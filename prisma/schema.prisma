@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  super_admin
+  admin
+  operator
+  viewer
+}
+
+enum TenantStatus {
+  active
+  suspended
+  trial
+}
+
+enum DeviceStatus {
+  active
+  inactive
+  disabled
+}
+
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  trialing
+}
+
+model Tenant {
+  id         String       @id @default(cuid())
+  name       String
+  slug       String       @unique
+  status     TenantStatus @default(trial)
+  maxDevices Int          @default(10) @map("max_devices")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  users         User[]
+  devices       Device[]
+  subscriptions Subscription[]
+
+  @@map("tenants")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      UserRole @default(operator)
+  tenantId  String?  @map("tenant_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Device {
+  id           String       @id @default(cuid())
+  tenantId     String       @map("tenant_id")
+  traccarId    Int?         @unique @map("traccar_id")
+  name         String
+  imei         String       @unique
+  status       DeviceStatus @default(active)
+  vehiclePlate String?      @map("vehicle_plate")
+  vehicleType  String?      @map("vehicle_type")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("devices")
+}
+
+model Plan {
+  id         String  @id @default(cuid())
+  name       String  @unique
+  maxDevices Int     @map("max_devices")
+  price      Int     // cents
+  interval   String  @default("monthly")
+  features   Json    @default("[]")
+  active     Boolean @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  tenantId         String             @map("tenant_id")
+  planId           String             @map("plan_id")
+  status           SubscriptionStatus @default(trialing)
+  currentPeriodEnd DateTime?          @map("current_period_end")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@index([tenantId])
+  @@map("subscriptions")
+}
