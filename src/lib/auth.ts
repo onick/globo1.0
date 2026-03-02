@@ -41,18 +41,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = (user as Record<string, unknown>).role;
-        token.tenantId = (user as Record<string, unknown>).tenantId;
-        token.tenantSlug = (user as Record<string, unknown>).tenantSlug;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const u = user as any;
+        token.role = u.role;
+        token.tenantId = u.tenantId;
+        token.tenantSlug = u.tenantSlug;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as Record<string, unknown>).id = token.sub;
-        (session.user as Record<string, unknown>).role = token.role;
-        (session.user as Record<string, unknown>).tenantId = token.tenantId;
-        (session.user as Record<string, unknown>).tenantSlug = token.tenantSlug;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const u = session.user as any;
+        u.id = token.sub;
+        u.role = token.role;
+        u.tenantId = token.tenantId;
+        u.tenantSlug = token.tenantSlug;
       }
       return session;
     },

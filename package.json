@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "postinstall": "mkdir -p node_modules/@types/mapbox__point-geometry && test -f node_modules/@types/mapbox__point-geometry/index.d.ts || echo 'export {}' > node_modules/@types/mapbox__point-geometry/index.d.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -12,7 +13,7 @@
     "seed": "npx tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^7.4.2",
+    "@prisma/client": "6.19.2",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -30,13 +31,14 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
+    "@types/mapbox__point-geometry": "^1.0.87",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "prisma": "^7.4.2",
+    "prisma": "6.19.2",
     "shadcn": "^3.8.5",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
