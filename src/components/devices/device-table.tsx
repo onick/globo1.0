@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, Cpu } from "lucide-react";
 
 interface Device {
   id: string;
@@ -13,11 +12,7 @@ interface Device {
   vehicleType: string | null;
 }
 
-export function DeviceTable({
-  devices: initialDevices,
-}: {
-  devices: Device[];
-}) {
+export function DeviceTable({ devices: initialDevices }: { devices: Device[] }) {
   const [devices, setDevices] = useState(initialDevices);
 
   async function handleDelete(id: string) {
@@ -29,53 +24,49 @@ export function DeviceTable({
   }
 
   return (
-    <div className="bg-white rounded-lg border">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-box border border-base-content/5 bg-base-100">
+      <table className="table">
         <thead>
-          <tr className="border-b bg-zinc-50">
-            <th className="text-left p-3 font-medium">Name</th>
-            <th className="text-left p-3 font-medium">IMEI</th>
-            <th className="text-left p-3 font-medium">Plate</th>
-            <th className="text-left p-3 font-medium">Type</th>
-            <th className="text-left p-3 font-medium">Status</th>
-            <th className="p-3"></th>
+          <tr>
+            <th>Name</th>
+            <th>IMEI</th>
+            <th>Plate</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th className="w-10"></th>
           </tr>
         </thead>
         <tbody>
           {devices.map((device) => (
-            <tr key={device.id} className="border-b last:border-0">
-              <td className="p-3 font-medium">{device.name}</td>
-              <td className="p-3 text-zinc-500 font-mono text-xs">
-                {device.imei}
+            <tr key={device.id} className="hover">
+              <td className="font-medium">{device.name}</td>
+              <td className="font-mono text-xs tabular-nums text-base-content/50">{device.imei}</td>
+              <td className="text-base-content/70">{device.vehiclePlate || "\u2014"}</td>
+              <td className="text-base-content/70 capitalize">{device.vehicleType || "\u2014"}</td>
+              <td>
+                <div className="flex items-center gap-1.5">
+                  <span className={`status ${device.status === "active" ? "status-success" : "status-neutral"}`} />
+                  <span className={`text-xs font-medium ${device.status === "active" ? "text-success" : "text-base-content/40"}`}>
+                    {device.status}
+                  </span>
+                </div>
               </td>
-              <td className="p-3">{device.vehiclePlate || "\u2014"}</td>
-              <td className="p-3">{device.vehicleType || "\u2014"}</td>
-              <td className="p-3">
-                <span
-                  className={`px-2 py-1 rounded-full text-xs ${
-                    device.status === "active"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-zinc-100 text-zinc-500"
-                  }`}
-                >
-                  {device.status}
-                </span>
-              </td>
-              <td className="p-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
+              <td>
+                <button
                   onClick={() => handleDelete(device.id)}
+                  className="btn btn-ghost btn-xs btn-square text-base-content/30 hover:text-error"
                 >
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </td>
             </tr>
           ))}
           {devices.length === 0 && (
             <tr>
-              <td colSpan={6} className="p-8 text-center text-zinc-400">
-                No devices yet. Add your first device.
+              <td colSpan={6} className="text-center py-12">
+                <Cpu className="w-8 h-8 text-base-content/20 mx-auto mb-3" />
+                <p className="text-sm text-base-content/50">No devices yet</p>
+                <p className="text-xs text-base-content/30 mt-0.5">Add your first GPS device to start tracking</p>
               </td>
             </tr>
           )}

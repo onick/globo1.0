@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
-import { Map, Cpu, Settings, CreditCard, Building2 } from "lucide-react";
+import { Map, Cpu, Settings, LayoutDashboard, Radio } from "lucide-react";
 
 const navigation = [
   { name: "Map", href: "/map", icon: Map },
@@ -11,39 +10,62 @@ const navigation = [
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
-const adminNavigation = [
-  { name: "Tenants", href: "/admin/tenants", icon: Building2 },
-  { name: "Plans", href: "/admin/plans", icon: CreditCard },
-];
-
 export function Sidebar({ role }: { role: string }) {
   const pathname = usePathname();
 
-  const items =
-    role === "super_admin"
-      ? [...navigation, ...adminNavigation]
-      : navigation;
-
   return (
-    <aside className="w-64 bg-zinc-900 text-white min-h-screen p-4 flex flex-col">
-      <div className="text-xl font-bold mb-8 px-2">Globo GPS</div>
-      <nav className="space-y-1 flex-1">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-              pathname === item.href
-                ? "bg-zinc-800 text-white"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-            )}
-          >
-            <item.icon className="h-4 w-4" />
-            {item.name}
-          </Link>
-        ))}
-      </nav>
+    <aside className="w-56 bg-neutral min-h-screen flex flex-col">
+      {/* Brand */}
+      <div className="px-5 py-5 flex items-center gap-2.5">
+        <div className="w-7 h-7 rounded-md bg-success/20 flex items-center justify-center">
+          <Radio className="w-3.5 h-3.5 text-success" />
+        </div>
+        <span className="text-[15px] font-semibold tracking-tight text-neutral-content">
+          Globo GPS
+        </span>
+      </div>
+
+      {/* Navigation — daisyUI menu */}
+      <ul className="menu menu-sm flex-1 px-3 mt-2 gap-0.5">
+        {navigation.map((item) => {
+          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                className={active ? "bg-neutral-content/10 text-neutral-content font-medium" : "text-neutral-content/60 hover:text-neutral-content hover:bg-neutral-content/5"}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.name}
+                {active && (
+                  <span className="ml-auto status status-success" />
+                )}
+              </Link>
+            </li>
+          );
+        })}
+        {role === "super_admin" && (
+          <li className="mt-4">
+            <Link
+              href="/admin"
+              className="text-warning/80 hover:text-warning hover:bg-warning/5"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              Admin Panel
+            </Link>
+          </li>
+        )}
+      </ul>
+
+      {/* Footer — system status */}
+      <div className="px-5 py-4 border-t border-neutral-content/10">
+        <div className="flex items-center gap-2">
+          <span className="status status-success animate-pulse" />
+          <span className="text-[11px] text-neutral-content/50 tracking-wide uppercase">
+            System Online
+          </span>
+        </div>
+      </div>
     </aside>
   );
 }

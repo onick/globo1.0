@@ -4,16 +4,7 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Loader2, Radio } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,42 +28,71 @@ export default function LoginPage() {
       setError("Invalid email or password");
       setLoading(false);
     } else {
-      router.push("/map");
+      // Check if user is super_admin to redirect to admin panel
+      const sessionRes = await fetch("/api/auth/session");
+      const session = await sessionRes.json();
+      const role = session?.user?.role;
+      router.push(role === "super_admin" ? "/admin" : "/map");
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-2xl">Globo GPS</CardTitle>
-        <CardDescription>Sign in to your account</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <p className="text-sm text-red-500 bg-red-50 p-2 rounded">
-              {error}
-            </p>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" name="email" type="email" required />
+    <div>
+      {/* Mobile brand */}
+      <div className="flex items-center gap-2.5 mb-8 lg:hidden">
+        <div className="w-8 h-8 rounded-md bg-success/20 flex items-center justify-center">
+          <Radio className="w-4 h-4 text-success" />
+        </div>
+        <span className="text-base font-semibold tracking-tight text-base-content">Globo GPS</span>
+      </div>
+
+      <div className="space-y-1.5 mb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-base-content">Sign in</h1>
+        <p className="text-sm text-base-content/50">Enter your credentials to access the dashboard</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div role="alert" className="alert alert-error alert-sm">
+            <span className="text-sm">{error}</span>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input id="password" name="password" type="password" required />
-          </div>
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
-          </Button>
-          <p className="text-sm text-center text-zinc-500">
-            No account?{" "}
-            <Link href="/register" className="text-zinc-900 underline">
-              Register
-            </Link>
-          </p>
-        </form>
-      </CardContent>
-    </Card>
+        )}
+
+        <fieldset className="fieldset">
+          <legend className="fieldset-legend">Email</legend>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            required
+            className="input input-bordered w-full"
+            placeholder="you@company.com"
+          />
+        </fieldset>
+
+        <fieldset className="fieldset">
+          <legend className="fieldset-legend">Password</legend>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            required
+            className="input input-bordered w-full"
+          />
+        </fieldset>
+
+        <button type="submit" disabled={loading} className="btn btn-primary w-full">
+          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+          {loading ? "Signing in..." : "Sign in"}
+        </button>
+
+        <p className="text-sm text-center text-base-content/50 pt-2">
+          No account?{" "}
+          <Link href="/register" className="link link-hover font-medium text-base-content">
+            Register your company
+          </Link>
+        </p>
+      </form>
+    </div>
   );
 }

@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 
 export function DeviceForm({ onCreated }: { onCreated: () => void }) {
   const [loading, setLoading] = useState(false);
@@ -39,45 +37,38 @@ export function DeviceForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="bg-white p-4 rounded-lg border space-y-4"
-    >
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">Device Name</Label>
-          <Input id="name" name="name" required placeholder="e.g. Truck 01" />
+    <form onSubmit={handleSubmit} className="card bg-base-100 border border-base-content/5">
+      <div className="card-body gap-4">
+        {error && (
+          <div role="alert" className="alert alert-error alert-sm">
+            <span className="text-sm">{error}</span>
+          </div>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <fieldset className="fieldset">
+            <legend className="fieldset-legend">Device Name</legend>
+            <input id="name" name="name" required placeholder="e.g. Truck 01" className="input input-bordered w-full" />
+          </fieldset>
+          <fieldset className="fieldset">
+            <legend className="fieldset-legend">IMEI</legend>
+            <input id="imei" name="imei" required placeholder="15-digit IMEI" className="input input-bordered w-full" />
+          </fieldset>
+          <fieldset className="fieldset">
+            <legend className="fieldset-legend">License Plate</legend>
+            <input id="vehiclePlate" name="vehiclePlate" placeholder="Optional" className="input input-bordered w-full" />
+          </fieldset>
+          <fieldset className="fieldset">
+            <legend className="fieldset-legend">Vehicle Type</legend>
+            <input id="vehicleType" name="vehicleType" placeholder="e.g. truck, car, motorcycle" className="input input-bordered w-full" />
+          </fieldset>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="imei">IMEI</Label>
-          <Input
-            id="imei"
-            name="imei"
-            required
-            placeholder="15-digit IMEI"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="vehiclePlate">License Plate</Label>
-          <Input
-            id="vehiclePlate"
-            name="vehiclePlate"
-            placeholder="Optional"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="vehicleType">Vehicle Type</Label>
-          <Input
-            id="vehicleType"
-            name="vehicleType"
-            placeholder="e.g. truck, car, motorcycle"
-          />
+        <div>
+          <button type="submit" disabled={loading} className="btn btn-primary btn-sm">
+            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {loading ? "Adding..." : "Add Device"}
+          </button>
         </div>
       </div>
-      <Button type="submit" disabled={loading}>
-        {loading ? "Adding..." : "Add Device"}
-      </Button>
     </form>
   );
 }

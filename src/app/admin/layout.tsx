@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Sidebar } from "@/components/layout/sidebar";
+import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { Header } from "@/components/layout/header";
 
 export default async function AdminLayout({
@@ -15,11 +15,11 @@ export default async function AdminLayout({
   if (role !== "super_admin") redirect("/map");
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar role={role as string} />
+    <div className="flex min-h-screen bg-base-200">
+      <AdminSidebar />
       <div className="flex-1 flex flex-col">
         <Header />
-        <main className="flex-1 p-6 bg-zinc-50">{children}</main>
+        <main className="flex-1 p-5">{children}</main>
       </div>
     </div>
   );

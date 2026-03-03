@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DeviceTable } from "@/components/devices/device-table";
 import { DeviceForm } from "@/components/devices/device-form";
+import { Plus, X } from "lucide-react";
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState([]);
@@ -18,13 +19,17 @@ export default function DevicesPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Devices</h1>
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight text-base-content">Devices</h1>
+          <p className="text-sm text-base-content/50 mt-0.5">Manage your GPS tracking devices</p>
+        </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800"
+          className="btn btn-primary btn-sm"
         >
+          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
           {showForm ? "Cancel" : "Add Device"}
         </button>
       </div>

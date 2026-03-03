@@ -113,3 +113,33 @@ model Subscription {
   @@index([tenantId])
   @@map("subscriptions")
 }
+
+model PlatformSettings {
+  id        String   @id @default("singleton")
+  settings  Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
+enum AuditLevel {
+  info
+  warning
+  error
+}
+
+model AuditLog {
+  id        String     @id @default(cuid())
+  userId    String?    @map("user_id")
+  userEmail String     @map("user_email")
+  action    String
+  resource  String
+  level     AuditLevel @default(info)
+  ipAddress String?    @map("ip_address")
+  metadata  Json?
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([level])
+  @@map("audit_logs")
+}
