@@ -12,7 +12,7 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   return (
-    <div className="flex min-h-screen bg-base-200">
+    <div className="flex min-h-screen bg-[#F1F5F9]">
       <Sidebar role={(session.user as Record<string, unknown>)?.role as string || "viewer"} />
       <div className="flex-1 flex flex-col">
         <Header />

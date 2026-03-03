@@ -14,7 +14,7 @@ export default auth((req) => {
   }
 
   if (req.auth && isAuthPage) {
-    const dashboardUrl = new URL("/map", req.url);
+    const dashboardUrl = new URL("/dashboard", req.url);
     return Response.redirect(dashboardUrl);
   }
 });
