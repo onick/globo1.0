@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { name, imei, vehiclePlate, vehicleType } = await request.json();
+  const { name, imei, vehiclePlate, vehicleType, driverName, driverPhone, tenantId: bodyTenantId } = await request.json();
 
   if (!name || !imei) {
     return NextResponse.json(
@@ -40,12 +40,31 @@ export async function POST(request: Request) {
     );
   }
 
+  // Resolve tenant: use session tenantId, or body tenantId for super_admin
+  const resolvedTenantId = (tenantId as string) || (bodyTenantId as string);
+
+  // super_admin without tenant: find or create a default one
+  let finalTenantId = resolvedTenantId;
+  if (!finalTenantId && role === "super_admin") {
+    let defaultTenant = await db.tenant.findFirst({ where: { status: "active" } });
+    if (!defaultTenant) {
+      defaultTenant = await db.tenant.create({
+        data: { name: "Default Fleet", slug: "default-fleet", status: "active", maxDevices: 100 },
+      });
+    }
+    finalTenantId = defaultTenant.id;
+  }
+
+  if (!finalTenantId) {
+    return NextResponse.json({ error: "No tenant associated" }, { status: 400 });
+  }
+
   // Check device limit
   const tenant = await db.tenant.findUnique({
-    where: { id: tenantId as string },
+    where: { id: finalTenantId },
   });
   const deviceCount = await db.device.count({
-    where: { tenantId: tenantId as string },
+    where: { tenantId: finalTenantId },
   });
   if (tenant && deviceCount >= tenant.maxDevices) {
     return NextResponse.json(
@@ -67,12 +86,14 @@ export async function POST(request: Request) {
   // Create in Globo DB
   const device = await db.device.create({
     data: {
-      tenantId: tenantId as string,
+      tenantId: finalTenantId,
       traccarId,
       name,
       imei,
       vehiclePlate: vehiclePlate || null,
       vehicleType: vehicleType || null,
+      driverName: driverName || null,
+      driverPhone: driverPhone || null,
     },
   });
 

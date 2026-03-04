@@ -95,6 +95,20 @@ class TraccarClient {
     return this.request<TraccarPosition[]>(`/positions${query}`);
   }
 
+  // Route report (position history)
+  async getRouteReport(
+    deviceId: number,
+    from: string,
+    to: string
+  ): Promise<TraccarPosition[]> {
+    const params = new URLSearchParams({
+      deviceId: String(deviceId),
+      from,
+      to,
+    });
+    return this.request<TraccarPosition[]>(`/reports/route?${params}`);
+  }
+
   // WebSocket URL for real-time positions
   getWebSocketUrl(): string {
     return process.env.TRACCAR_WS_URL || "ws://localhost:8082/api/socket";

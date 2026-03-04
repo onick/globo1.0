@@ -64,10 +64,12 @@ export async function PATCH(
   const updated = await db.device.update({
     where: { id },
     data: {
-      name: data.name,
-      vehiclePlate: data.vehiclePlate,
-      vehicleType: data.vehicleType,
-      status: data.status,
+      ...(data.name !== undefined && { name: data.name }),
+      ...(data.vehiclePlate !== undefined && { vehiclePlate: data.vehiclePlate }),
+      ...(data.vehicleType !== undefined && { vehicleType: data.vehicleType }),
+      ...(data.driverName !== undefined && { driverName: data.driverName }),
+      ...(data.driverPhone !== undefined && { driverPhone: data.driverPhone }),
+      ...(data.status !== undefined && { status: data.status }),
     },
   });
 
