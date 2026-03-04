@@ -2,7 +2,16 @@ services:
   traccar:
     image: traccar/traccar:latest
     ports:
-      - "8083:8082"
+      - "8083:8082"        # Traccar web/API
+      - "5001:5001"        # GP103
+      - "5002:5002"        # TK103-2
+      - "5006:5006"        # Meiligao
+      - "5007:5007"        # MeiTrack
+      - "5013:5013"        # TK103
+      - "5023:5023"        # GT06 (Concox, R16, etc.)
+      - "5027:5027"        # Teltonika
+      - "5055:5055"        # H02 (Sinotrack)
+      - "5093:5093"        # Queclink
       - "5155-5170:5155-5170"
     volumes:
       - ./docker/traccar/traccar.xml:/opt/traccar/conf/traccar.xml:ro

@@ -50,6 +50,11 @@ export async function GET(request: Request) {
         speed: p.speed,
         course: p.course,
         fixTime: p.fixTime,
+        attributes: {
+          ignition: p.attributes?.ignition,
+          motion: p.attributes?.motion,
+          totalDistance: p.attributes?.totalDistance,
+        },
       }))
     );
   } catch (err) {

@@ -57,6 +57,7 @@ class TraccarClient {
         ...options.headers,
         Cookie: this.cookie || "",
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
     });
 

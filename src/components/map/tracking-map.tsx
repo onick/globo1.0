@@ -21,9 +21,13 @@ import {
   X,
   Loader2,
   ChevronRight,
+  History,
 } from "lucide-react";
 import { DeviceDetailPanel } from "./device-detail-panel";
 import { SensorOverlay } from "./sensor-overlay";
+import { HistoryPanel } from "./history-panel";
+import { PlaybackControls } from "./playback-controls";
+import { useRouteHistory, type StopEvent, type RouteSegment } from "@/hooks/useRouteHistory";
 
 /* ── constants ────────────────────────────────────────── */
 
@@ -188,6 +192,20 @@ export function TrackingMap() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [detailDeviceId, setDetailDeviceId] = useState<string | null>(null);
   const [sensorOverlayOpen, setSensorOverlayOpen] = useState(true);
+
+  /* ── History mode state ────────────────────────────── */
+  const [mapMode, setMapMode] = useState<"live" | "history">("live");
+  const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
+  const routeHistory = useRouteHistory();
+
+  // Playback state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [playbackIndex, setPlaybackIndex] = useState(0);
+  const playbackMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const historyMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const animFrameRef = useRef<number | null>(null);
+  const lastTickRef = useRef<number>(0);
 
   /* ── detail device (live-updated from devices array) ── */
   const detailDevice = useMemo(() => {
@@ -567,6 +585,375 @@ export function TrackingMap() {
     // The trail effect will re-add sources on next render.
   }, [mapStyle]);
 
+  /* ── History layers cleanup ────────────────────────── */
+  const clearHistoryLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Remove segment layers/sources
+    try {
+      const style = map.getStyle();
+      if (style?.layers) {
+        style.layers.forEach((layer) => {
+          if (layer.id.startsWith("history-seg-")) {
+            try { map.removeLayer(layer.id); } catch {}
+          }
+        });
+      }
+      if (style?.sources) {
+        Object.keys(style.sources).forEach((srcId) => {
+          if (srcId.startsWith("history-seg-")) {
+            try { map.removeSource(srcId); } catch {}
+          }
+        });
+      }
+    } catch {}
+
+    // Remove history markers (stops + start/end)
+    historyMarkersRef.current.forEach((m) => m.remove());
+    historyMarkersRef.current = [];
+
+    // Remove playback marker
+    if (playbackMarkerRef.current) {
+      playbackMarkerRef.current.remove();
+      playbackMarkerRef.current = null;
+    }
+
+    // Cancel animation
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setIsPlaying(false);
+    setPlaybackIndex(0);
+  }, []);
+
+  /* ── Switch mode cleanup ───────────────────────────── */
+  const switchToLive = useCallback(() => {
+    clearHistoryLayers();
+    routeHistory.clear();
+    setHistoryDeviceId(null);
+    setMapMode("live");
+  }, [clearHistoryLayers, routeHistory]);
+
+  const switchToHistory = useCallback(() => {
+    setFollowingDeviceId(null);
+    clearRoute();
+    setDetailDeviceId(null);
+    setMapMode("history");
+  }, [clearRoute]);
+
+  /* ── Render history segments on map ────────────────── */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || mapMode !== "history" || routeHistory.segments.length === 0) return;
+
+    const renderLayers = () => {
+      // Clear previous history layers first
+      try {
+        const style = map.getStyle();
+        if (style?.layers) {
+          style.layers.forEach((layer) => {
+            if (layer.id.startsWith("history-seg-")) {
+              try { map.removeLayer(layer.id); } catch {}
+            }
+          });
+        }
+        if (style?.sources) {
+          Object.keys(style.sources).forEach((srcId) => {
+            if (srcId.startsWith("history-seg-")) {
+              try { map.removeSource(srcId); } catch {}
+            }
+          });
+        }
+      } catch {}
+
+      // Remove old markers
+      historyMarkersRef.current.forEach((m) => m.remove());
+      historyMarkersRef.current = [];
+
+      const bounds = new maplibregl.LngLatBounds();
+
+      // 1. Draw a continuous base line with ALL positions (ensures no gaps)
+      const allCoords = routeHistory.positions.map((p) => [p.longitude, p.latitude]);
+      if (allCoords.length >= 2) {
+        allCoords.forEach((c) => bounds.extend(c as [number, number]));
+        try {
+          map.addSource("history-seg-base", {
+            type: "geojson",
+            data: {
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates: allCoords },
+            },
+          });
+          map.addLayer({
+            id: "history-seg-base-line",
+            type: "line",
+            source: "history-seg-base",
+            paint: {
+              "line-color": "#94A3B8",
+              "line-width": 3,
+              "line-opacity": 0.25,
+            },
+            layout: { "line-cap": "round", "line-join": "round" },
+          });
+        } catch {}
+      }
+
+      // 2. Overlay colored segments on top, connecting each to the next
+      routeHistory.segments.forEach((seg, i) => {
+        const coords = seg.positions.map((p) => [p.longitude, p.latitude]);
+
+        // Connect to previous segment: prepend last point of previous segment
+        if (i > 0) {
+          const prevSeg = routeHistory.segments[i - 1];
+          const prevLast = prevSeg.positions[prevSeg.positions.length - 1];
+          coords.unshift([prevLast.longitude, prevLast.latitude]);
+        }
+
+        // Connect to next segment: append first point of next segment
+        if (i < routeHistory.segments.length - 1) {
+          const nextSeg = routeHistory.segments[i + 1];
+          const nextFirst = nextSeg.positions[0];
+          coords.push([nextFirst.longitude, nextFirst.latitude]);
+        }
+
+        if (coords.length < 2) return;
+
+        const sourceId = `history-seg-${i}`;
+        const layerId = `history-seg-line-${i}`;
+
+        try {
+          map.addSource(sourceId, {
+            type: "geojson",
+            data: {
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates: coords },
+            },
+          });
+          map.addLayer({
+            id: layerId,
+            type: "line",
+            source: sourceId,
+            paint: {
+              "line-color": seg.color,
+              "line-width": seg.type === "moving" ? 4 : 3,
+              "line-opacity": seg.type === "moving" ? 0.85 : 0.5,
+            },
+            layout: { "line-cap": "round", "line-join": "round" },
+          });
+        } catch {}
+      });
+
+      // Stop markers
+      routeHistory.stops.forEach((stop, i) => {
+        const el = document.createElement("div");
+        el.style.cssText = `
+          width: 24px; height: 24px; border-radius: 50%;
+          background: #F59E0B; border: 2px solid #fff;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 11px; font-weight: 700; color: #fff;
+          cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+        `;
+        el.textContent = String(i + 1);
+
+        const dur = stop.duration;
+        const durStr = dur < 60000 ? `${Math.round(dur / 1000)}s`
+          : dur < 3600000 ? `${Math.floor(dur / 60000)} min`
+          : `${Math.floor(dur / 3600000)}h ${Math.floor((dur % 3600000) / 60000)}m`;
+
+        const popup = new maplibregl.Popup({ offset: 14 }).setHTML(`
+          <div style="font-family:system-ui;font-size:12px;">
+            <strong style="color:#F59E0B;">Stop #${i + 1}</strong><br/>
+            Duration: <b>${durStr}</b><br/>
+            <span style="color:#94A3B8;font-size:11px;">${new Date(stop.startTime).toLocaleTimeString()} — ${new Date(stop.endTime).toLocaleTimeString()}</span>
+          </div>
+        `);
+
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([stop.longitude, stop.latitude])
+          .setPopup(popup)
+          .addTo(map);
+        historyMarkersRef.current.push(marker);
+      });
+
+      // Start marker (green dot)
+      if (routeHistory.positions.length > 0) {
+        const first = routeHistory.positions[0];
+        const startEl = document.createElement("div");
+        startEl.style.cssText = `
+          width: 14px; height: 14px; border-radius: 50%;
+          background: #16A34A; border: 3px solid #fff;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        `;
+        const startMarker = new maplibregl.Marker({ element: startEl })
+          .setLngLat([first.longitude, first.latitude])
+          .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(
+            `<div style="font-family:system-ui;font-size:12px;"><strong style="color:#16A34A;">Start</strong><br/>${new Date(first.fixTime).toLocaleTimeString()}</div>`
+          ))
+          .addTo(map);
+        historyMarkersRef.current.push(startMarker);
+
+        // End marker (red dot)
+        const last = routeHistory.positions[routeHistory.positions.length - 1];
+        const endEl = document.createElement("div");
+        endEl.style.cssText = `
+          width: 14px; height: 14px; border-radius: 50%;
+          background: #EF4444; border: 3px solid #fff;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        `;
+        const endMarker = new maplibregl.Marker({ element: endEl })
+          .setLngLat([last.longitude, last.latitude])
+          .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(
+            `<div style="font-family:system-ui;font-size:12px;"><strong style="color:#EF4444;">End</strong><br/>${new Date(last.fixTime).toLocaleTimeString()}</div>`
+          ))
+          .addTo(map);
+        historyMarkersRef.current.push(endMarker);
+      }
+
+      // Fit bounds
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, { padding: 80, duration: 1200 });
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      renderLayers();
+    } else {
+      map.once("style.load", renderLayers);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeHistory.segments, routeHistory.stops, routeHistory.positions, mapMode]);
+
+  /* ── Playback animation ────────────────────────────── */
+  useEffect(() => {
+    if (!isPlaying || mapMode !== "history" || routeHistory.positions.length === 0) {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      return;
+    }
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Create playback marker if needed
+    if (!playbackMarkerRef.current) {
+      const el = document.createElement("div");
+      el.innerHTML = createArrowSvg("#2563EB", 0);
+      el.style.cssText = "cursor:pointer;line-height:0;";
+      playbackMarkerRef.current = new maplibregl.Marker({ element: el, rotationAlignment: "map" })
+        .setLngLat([routeHistory.positions[0].longitude, routeHistory.positions[0].latitude])
+        .addTo(map);
+    }
+
+    lastTickRef.current = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed = now - lastTickRef.current;
+      lastTickRef.current = now;
+
+      // Advance based on speed (base: 1 position per 100ms at 1x)
+      const advance = Math.max(1, Math.floor((elapsed / 100) * playbackSpeed));
+
+      setPlaybackIndex((prev) => {
+        const next = Math.min(prev + advance, routeHistory.positions.length - 1);
+
+        const pos = routeHistory.positions[next];
+        if (pos && playbackMarkerRef.current) {
+          playbackMarkerRef.current.setLngLat([pos.longitude, pos.latitude]);
+          // Update arrow rotation
+          const el = playbackMarkerRef.current.getElement();
+          el.innerHTML = createArrowSvg("#2563EB", pos.course);
+
+          // Keep map centered on playback
+          map.easeTo({ center: [pos.longitude, pos.latitude], duration: 80 });
+        }
+
+        if (next >= routeHistory.positions.length - 1) {
+          setIsPlaying(false);
+          return next;
+        }
+        return next;
+      });
+
+      animFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    animFrameRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+    };
+  }, [isPlaying, playbackSpeed, mapMode, routeHistory.positions]);
+
+  /* ── Playback helpers ──────────────────────────────── */
+  const formatPlaybackTime = useCallback((index: number) => {
+    if (routeHistory.positions.length === 0) return "00:00";
+    const pos = routeHistory.positions[Math.min(index, routeHistory.positions.length - 1)];
+    return new Date(pos.fixTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }, [routeHistory.positions]);
+
+  const handlePlayPause = useCallback(() => {
+    if (playbackIndex >= routeHistory.positions.length - 1) {
+      setPlaybackIndex(0);
+    }
+    setIsPlaying((prev) => !prev);
+  }, [playbackIndex, routeHistory.positions.length]);
+
+  const handleSeek = useCallback((pct: number) => {
+    const idx = Math.floor(pct * (routeHistory.positions.length - 1));
+    setPlaybackIndex(idx);
+
+    const pos = routeHistory.positions[idx];
+    if (pos && playbackMarkerRef.current) {
+      playbackMarkerRef.current.setLngLat([pos.longitude, pos.latitude]);
+      const el = playbackMarkerRef.current.getElement();
+      el.innerHTML = createArrowSvg("#2563EB", pos.course);
+    }
+  }, [routeHistory.positions]);
+
+  const handleStepBack = useCallback(() => {
+    setIsPlaying(false);
+    setPlaybackIndex((prev) => Math.max(0, prev - 10));
+  }, []);
+
+  const handleStepForward = useCallback(() => {
+    setIsPlaying(false);
+    setPlaybackIndex((prev) => Math.min(routeHistory.positions.length - 1, prev + 10));
+  }, [routeHistory.positions.length]);
+
+  /* ── History search handler ────────────────────────── */
+  const handleHistorySearch = useCallback((deviceId: string, from: Date, to: Date) => {
+    clearHistoryLayers();
+    setHistoryDeviceId(deviceId);
+    routeHistory.fetchHistory(deviceId, from, to);
+  }, [clearHistoryLayers, routeHistory]);
+
+  const handleStopClick = useCallback((stop: StopEvent) => {
+    mapRef.current?.flyTo({
+      center: [stop.longitude, stop.latitude],
+      zoom: 16,
+      duration: 1000,
+    });
+  }, []);
+
+  const handleSegmentClick = useCallback((segment: RouteSegment) => {
+    if (segment.positions.length === 0) return;
+    const mid = segment.positions[Math.floor(segment.positions.length / 2)];
+    mapRef.current?.flyTo({
+      center: [mid.longitude, mid.latitude],
+      zoom: 15,
+      duration: 1000,
+    });
+  }, []);
+
   /* ── fly to device ─────────────────────────────────── */
   function handleDeviceClick(device: TrackedDevice) {
     setSelectedDeviceId(device.id);
@@ -619,6 +1006,32 @@ export function TrackingMap() {
       {/* Map */}
       <div ref={mapContainer} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} />
 
+      {/* ── Live / History Toggle Pill ── */}
+      <div className="absolute z-20 top-4 left-1/2 -translate-x-1/2 flex items-center bg-white/95 backdrop-blur-sm rounded-full shadow-md border border-[#E2E8F0] p-0.5">
+        <button
+          onClick={() => { if (mapMode !== "live") switchToLive(); }}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium transition-all ${
+            mapMode === "live"
+              ? "bg-[#2563EB] text-white"
+              : "text-[#64748B] hover:text-[#0F172A]"
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full ${mapMode === "live" ? "bg-red-400 animate-pulse" : "bg-[#94A3B8]"}`} />
+          Live
+        </button>
+        <button
+          onClick={() => { if (mapMode !== "history") switchToHistory(); }}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium transition-all ${
+            mapMode === "history"
+              ? "bg-[#2563EB] text-white"
+              : "text-[#64748B] hover:text-[#0F172A]"
+          }`}
+        >
+          <History className="w-3.5 h-3.5" />
+          History
+        </button>
+      </div>
+
       {/* ── Device Panel ── */}
       <div
         className={`absolute top-0 left-0 h-full z-10 flex transition-all duration-300 ease-in-out ${
@@ -631,8 +1044,23 @@ export function TrackingMap() {
             panelOpen ? "w-[400px] opacity-100" : "w-0 opacity-0"
           }`}
         >
-          {/* ── Detail Panel (when a device is selected) ── */}
-          {detailDevice ? (
+          {/* ── History Panel (when in history mode) ── */}
+          {mapMode === "history" ? (
+            <HistoryPanel
+              devices={devices}
+              selectedDeviceId={historyDeviceId}
+              onDeviceSelect={setHistoryDeviceId}
+              onSearch={handleHistorySearch}
+              onClose={switchToLive}
+              loading={routeHistory.loading}
+              error={routeHistory.error}
+              summary={routeHistory.summary}
+              stops={routeHistory.stops}
+              segments={routeHistory.segments}
+              onStopClick={handleStopClick}
+              onSegmentClick={handleSegmentClick}
+            />
+          ) : detailDevice ? (
             <DeviceDetailPanel
               device={detailDevice}
               isFollowing={followingDeviceId === detailDevice.id}
@@ -789,9 +1217,9 @@ export function TrackingMap() {
         )}
       </div>
 
-      {/* ── Following indicator ── */}
-      {followingDeviceId && (
-        <div className="absolute z-20 top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#2563EB] text-white px-3 py-1.5 rounded-full shadow-lg text-[12px] font-medium">
+      {/* ── Following indicator (live mode only) ── */}
+      {mapMode === "live" && followingDeviceId && (
+        <div className="absolute z-20 top-14 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#2563EB] text-white px-3 py-1.5 rounded-full shadow-lg text-[12px] font-medium">
           <Crosshair className="w-3.5 h-3.5 animate-pulse" />
           Following {devices.find((d) => d.id === followingDeviceId)?.name || "device"}
           <button
@@ -803,8 +1231,8 @@ export function TrackingMap() {
         </div>
       )}
 
-      {/* ── Route indicator ── */}
-      {routeDeviceId && (
+      {/* ── Route indicator (live mode only) ── */}
+      {mapMode === "live" && routeDeviceId && (
         <div className="absolute z-20 bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white text-[#0F172A] px-3 py-1.5 rounded-full shadow-lg border border-[#E2E8F0] text-[12px] font-medium">
           <Route className="w-3.5 h-3.5 text-[#2563EB]" />
           Route: {devices.find((d) => d.id === routeDeviceId)?.name || "device"} (today)
@@ -817,8 +1245,28 @@ export function TrackingMap() {
         </div>
       )}
 
-      {/* ── Sensor Overlay (floating on map) ── */}
-      {sensorOverlayOpen &&
+      {/* ── Playback Controls (history mode only) ── */}
+      {mapMode === "history" && routeHistory.positions.length > 1 && (
+        <PlaybackControls
+          isPlaying={isPlaying}
+          speed={playbackSpeed}
+          progress={routeHistory.positions.length > 1 ? playbackIndex / (routeHistory.positions.length - 1) : 0}
+          currentTime={formatPlaybackTime(playbackIndex)}
+          totalTime={formatPlaybackTime(routeHistory.positions.length - 1)}
+          onPlayPause={handlePlayPause}
+          onSpeedChange={setPlaybackSpeed}
+          onSeek={handleSeek}
+          onSkipStart={() => { setIsPlaying(false); setPlaybackIndex(0); handleSeek(0); }}
+          onSkipEnd={() => { setIsPlaying(false); setPlaybackIndex(routeHistory.positions.length - 1); handleSeek(1); }}
+          onStepBack={handleStepBack}
+          onStepForward={handleStepForward}
+          onClose={switchToLive}
+        />
+      )}
+
+      {/* ── Sensor Overlay (floating on map, live mode only) ── */}
+      {mapMode === "live" &&
+        sensorOverlayOpen &&
         detailDevice?.position?.attributes &&
         Object.keys(detailDevice.position.attributes).length > 0 && (
           <div className="absolute z-20 top-14 right-14 transition-all duration-200">
