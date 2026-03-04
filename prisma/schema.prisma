@@ -74,6 +74,8 @@ model Device {
   status       DeviceStatus @default(active)
   vehiclePlate String?      @map("vehicle_plate")
   vehicleType  String?      @map("vehicle_type")
+  driverName   String?      @map("driver_name")
+  driverPhone  String?      @map("driver_phone")
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
