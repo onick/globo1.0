@@ -142,6 +142,37 @@ describe("adding a vehicle with its tracker", () => {
   });
 });
 
+describe("drawn geofences", () => {
+  const square = [
+    [-69.931, 18.48],
+    [-69.929, 18.48],
+    [-69.929, 18.482],
+    [-69.931, 18.482],
+  ];
+
+  it("are stored with their shape, center and an enclosing radius", async () => {
+    signInAs(w.a.operator);
+    const { status, body } = await call(geofences.POST, {
+      method: "POST",
+      body: { name: "Yard", shape: "polygon", polygon: [...square, square[0]], tenantId: w.b.tenant.id },
+    });
+    expect(status).toBe(201);
+    expect(body).toMatchObject({ tenantId: w.a.tenant.id, shape: "polygon", polygon: square, latitude: 18.481, longitude: -69.93 });
+    expect(body.radiusM).toBeGreaterThan(150);
+    const list = (await call(geofences.GET)).body as { name: string; shape: string }[];
+    expect(list.find((g) => g.name === "Yard")).toMatchObject({ shape: "polygon" });
+  });
+
+  it("reject shapes that can't be watched", async () => {
+    signInAs(w.a.admin);
+    const bowTie = [square[0], square[2], square[1], square[3]];
+    const { status, body } = await call(geofences.POST, { method: "POST", body: { name: "Bad", shape: "polygon", polygon: bowTie } });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/cross/);
+    expect(await db.geofence.count({ where: { name: "Bad" } })).toBe(0);
+  });
+});
+
 describe("a refused change leaves the data untouched", () => {
   it("viewer deleting a vehicle", async () => {
     signInAs(w.a.viewer);

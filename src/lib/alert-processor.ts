@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { DEFAULT_SPEED_LIMIT_KMH } from "@/lib/activity";
 import { knotsToKmh } from "@/lib/history";
+import type { LngLat } from "@/lib/geofences";
 import { enqueueNotifications } from "@/lib/notify/dispatcher";
 import {
   evaluatePosition,
@@ -52,7 +53,11 @@ async function loadCache() {
   const byTenant = new Map<string, EngineGeofence[]>();
   for (const g of geofences) {
     const list = byTenant.get(g.tenantId) ?? [];
-    list.push({ id: g.id, latitude: g.latitude, longitude: g.longitude, radiusM: g.radiusM });
+    list.push(
+      g.shape === "polygon"
+        ? { id: g.id, shape: "polygon", polygon: g.polygon as LngLat[] }
+        : { id: g.id, latitude: g.latitude, longitude: g.longitude, radiusM: g.radiusM }
+    );
     byTenant.set(g.tenantId, list);
   }
 
