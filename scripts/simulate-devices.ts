@@ -2,7 +2,12 @@
  * Simulates GPS devices following real roads in Dominican Republic.
  * Vehicles move along predefined waypoint routes (actual road coordinates).
  *
- * Usage: npx tsx scripts/simulate-devices.ts
+ * Positions go to Traccar like a real tracker would (OsmAnd protocol), so the live map,
+ * history, reports and alerts all see the simulated vehicles.
+ *
+ * Usage: node --env-file=.env --import tsx scripts/simulate-devices.ts
+ *   TRACCAR_API_URL, TRACCAR_ADMIN_EMAIL, TRACCAR_ADMIN_PASSWORD  (from .env)
+ *   TRACCAR_OSMAND_URL  OsmAnd port of Traccar (default http://localhost:5055)
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -188,6 +193,41 @@ interface SimDevice {
   progress: number;  // 0-1 between current and next waypoint
   speedRange: [number, number];
   stopTimer: number; // ticks remaining at a stop
+  imei: string;
+}
+
+/* ── Traccar ─────────────────────────────────────────────── */
+
+const TRACCAR_API = process.env.TRACCAR_API_URL || "http://localhost:8082/api";
+const OSMAND_URL = process.env.TRACCAR_OSMAND_URL || "http://localhost:5055";
+
+async function traccarSession(): Promise<string> {
+  const res = await fetch(`${TRACCAR_API}/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      email: process.env.TRACCAR_ADMIN_EMAIL || "",
+      password: process.env.TRACCAR_ADMIN_PASSWORD || "",
+    }),
+  });
+  if (!res.ok) throw new Error(`Traccar login failed: ${res.status}`);
+  return res.headers.get("set-cookie")!.split(";")[0];
+}
+
+// The Traccar device for an IMEI, created if missing
+async function ensureTraccarDevice(cookie: string, name: string, imei: string): Promise<number> {
+  const found = await fetch(`${TRACCAR_API}/devices?uniqueId=${encodeURIComponent(imei)}`, {
+    headers: { Cookie: cookie },
+  }).then((r) => r.json());
+  if (found.length) return found[0].id;
+
+  const res = await fetch(`${TRACCAR_API}/devices`, {
+    method: "POST",
+    headers: { Cookie: cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ name, uniqueId: imei }),
+  });
+  if (!res.ok) throw new Error(`Could not create Traccar device ${imei}: ${res.status}`);
+  return (await res.json()).id;
 }
 
 /* ── Setup ───────────────────────────────────────────────── */
@@ -202,10 +242,11 @@ async function setupDevices(): Promise<SimDevice[]> {
   }
 
   const simDevices: SimDevice[] = [];
+  const cookie = await traccarSession();
 
   for (let i = 0; i < VEHICLES.length; i++) {
     const v = VEHICLES[i];
-    const traccarId = 9000 + i;
+    const traccarId = await ensureTraccarDevice(cookie, v.name, v.imei);
     const route = ROUTES[v.routeIdx];
 
     let device = await db.device.findFirst({ where: { imei: v.imei } });
@@ -217,6 +258,9 @@ async function setupDevices(): Promise<SimDevice[]> {
           vehicleType: v.type, status: "active",
         },
       });
+    } else if (device.traccarId !== traccarId) {
+      // Older simulator runs used made-up ids (9000+)
+      device = await db.device.update({ where: { id: device.id }, data: { traccarId } });
     }
 
     const startIdx = Math.floor(Math.random() * (route.length - 1));
@@ -239,6 +283,7 @@ async function setupDevices(): Promise<SimDevice[]> {
       progress: 0,
       speedRange: v.speedRange as [number, number],
       stopTimer: 0,
+      imei: v.imei,
     });
   }
 
@@ -349,29 +394,28 @@ function updateSensors(d: SimDevice) {
   }
 }
 
-/* ── Write to Redis ─────────────────────────────────────── */
+/* ── Send to Traccar ────────────────────────────────────── */
 
+// One OsmAnd report per vehicle, like a tracker would send. Traccar stores speed in
+// knots, so the km/h the simulator works in is converted.
 async function writePositions(devices: SimDevice[]) {
-  const pipeline = redis.pipeline();
-  for (const d of devices) {
-    const posData = JSON.stringify({
-      deviceId: d.traccarId,
-      latitude: d.lat,
-      longitude: d.lng,
-      speed: d.speed,
-      course: d.course,
-      fixTime: new Date().toISOString(),
-      attributes: {
-        motion: d.speed > 0,
-        ignition: d.ignition,
-        batteryLevel: Math.round(d.batteryLevel),
-        totalDistance: Math.round(d.totalDistance * 1000) / 1000,
-        hours: d.hours,
-      },
-    });
-    pipeline.set(`device:pos:${d.traccarId}`, posData, "EX", 300);
-  }
-  await pipeline.exec();
+  const timestamp = Math.floor(Date.now() / 1000);
+  await Promise.all(
+    devices.map(async (d) => {
+      const query = new URLSearchParams({
+        id: d.imei,
+        lat: d.lat.toFixed(6),
+        lon: d.lng.toFixed(6),
+        timestamp: String(timestamp),
+        speed: (d.speed / 1.852).toFixed(2),
+        bearing: d.course.toFixed(0),
+        ignition: String(d.ignition),
+        batt: String(Math.round(d.batteryLevel)),
+      });
+      const res = await fetch(`${OSMAND_URL}/?${query}`);
+      if (!res.ok) console.error(`\n  Traccar rejected ${d.name}: ${res.status}`);
+    })
+  );
 }
 
 /* ── Main ────────────────────────────────────────────────── */

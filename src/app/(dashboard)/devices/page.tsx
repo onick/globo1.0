@@ -22,6 +22,7 @@ interface Device {
   vehicleType: string | null;
   driverName: string | null;
   driverPhone: string | null;
+  speedLimitKmh: number | null;
   traccarId: number | null;
   createdAt: string;
 }

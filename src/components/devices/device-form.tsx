@@ -28,7 +28,11 @@ interface DeviceData {
   vehicleType: string | null;
   driverName: string | null;
   driverPhone: string | null;
+  speedLimitKmh: number | null;
 }
+
+// Overspeed alerts use this when the vehicle has no limit of its own
+const DEFAULT_SPEED_LIMIT_KMH = 80;
 
 interface DeviceFormProps {
   device?: DeviceData | null;
@@ -45,6 +49,7 @@ export function DeviceForm({ device, onSaved, onCancel }: DeviceFormProps) {
   const [vehicleType, setVehicleType] = useState(device?.vehicleType || "");
   const [driverName, setDriverName] = useState(device?.driverName || "");
   const [driverPhone, setDriverPhone] = useState(device?.driverPhone || "");
+  const [speedLimit, setSpeedLimit] = useState(device?.speedLimitKmh?.toString() || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -60,6 +65,7 @@ export function DeviceForm({ device, onSaved, onCancel }: DeviceFormProps) {
       vehicleType: vehicleType || null,
       driverName: driverName || null,
       driverPhone: driverPhone || null,
+      speedLimitKmh: speedLimit.trim() === "" ? null : Number(speedLimit),
     };
 
     try {
@@ -160,6 +166,14 @@ export function DeviceForm({ device, onSaved, onCancel }: DeviceFormProps) {
               placeholder="e.g. A-123-456"
               value={vehiclePlate}
               onChange={setVehiclePlate}
+            />
+            <FormField
+              label="Speed Limit (km/h)"
+              placeholder={`${DEFAULT_SPEED_LIMIT_KMH} (default)`}
+              value={speedLimit}
+              onChange={setSpeedLimit}
+              type="number"
+              hint="Overspeed alerts above this. Empty uses the default."
             />
           </div>
         </div>

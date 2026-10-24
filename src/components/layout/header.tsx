@@ -1,5 +1,6 @@
 import { auth, signOut } from "@/lib/auth";
 import { LogOut, Shield, Building2 } from "lucide-react";
+import { AlertBell } from "@/components/alerts/alert-bell";
 
 export async function Header() {
   const session = await auth();
@@ -25,7 +26,8 @@ export async function Header() {
           </div>
         ) : null}
       </div>
-      <div className="flex-none gap-3">
+      <div className="flex-none flex items-center gap-3">
+        <AlertBell />
         <span className="text-xs text-base-content/50">{session?.user?.email}</span>
         <form
           action={async () => {

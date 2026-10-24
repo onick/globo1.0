@@ -14,7 +14,8 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-screen bg-[#F1F5F9]">
       <Sidebar role={(session.user as Record<string, unknown>)?.role as string || "viewer"} />
-      <div className="flex-1 flex flex-col">
+      {/* min-w-0: wide content (report tables) scrolls inside its box instead of widening the page */}
+      <div className="flex-1 flex flex-col min-w-0">
         <Header />
         <main className="flex-1 p-5 overflow-auto">{children}</main>
       </div>

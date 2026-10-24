@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import maplibregl from "maplibre-gl";
+import { useSearchParams } from "next/navigation";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   usePositions,
@@ -278,6 +279,8 @@ export function TrackingMap() {
               )
               .addTo(mapRef.current!);
           }
+          // Opened on a history period (report/alert link): keep the map on that route
+          if (new URLSearchParams(window.location.search).get("history") === "1") return;
           mapRef.current?.flyTo({
             center: [longitude, latitude],
             zoom: 13,
@@ -298,8 +301,12 @@ export function TrackingMap() {
   }, []);
 
   /* ── change map style ───────────────────────────────── */
+  // The map is created with the initial style: re-applying it on mount reloaded the style,
+  // which reset the view and dropped layers drawn in between (e.g. a linked history)
+  const appliedStyleRef = useRef(mapStyle);
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || appliedStyleRef.current === mapStyle) return;
+    appliedStyleRef.current = mapStyle;
     const currentCenter = mapRef.current.getCenter();
     const currentZoom = mapRef.current.getZoom();
 
@@ -497,21 +504,25 @@ export function TrackingMap() {
       const from = new Date(now);
       from.setHours(0, 0, 0, 0);
 
-      const res = await fetch(
-        `/api/positions/history?deviceId=${device.id}&from=${from.toISOString()}&to=${now.toISOString()}`
-      );
+      const query = new URLSearchParams({ deviceId: device.id, from: from.toISOString(), to: now.toISOString() });
+      const res = await fetch(`/api/history?${query}`);
 
       if (!res.ok) throw new Error("Failed to fetch route");
 
-      const points: { latitude: number; longitude: number; speed: number }[] =
-        await res.json();
+      const history: {
+        points: { latitude: number; longitude: number }[];
+        route: { segments: [number, number][][] } | null;
+      } = await res.json();
 
-      if (points.length < 2) {
+      if (history.points.length < 2) {
         setRouteLoading(false);
         return;
       }
 
-      const coordinates = points.map((p) => [p.longitude, p.latitude]);
+      // Along the roads when the route was matched; otherwise the GPS fixes
+      const coordinates = history.route
+        ? history.route.segments.flat()
+        : history.points.map((p) => [p.longitude, p.latitude]);
       const map = mapRef.current!;
 
       const addRouteLayer = () => {
@@ -675,7 +686,8 @@ export function TrackingMap() {
       const bounds = new maplibregl.LngLatBounds();
 
       // 1. Draw a continuous base line with ALL positions (ensures no gaps)
-      const allCoords = routeHistory.positions.map((p) => [p.longitude, p.latitude]);
+      // Along the roads when the route was matched; otherwise the GPS fixes
+      const allCoords = routeHistory.baseLine ?? routeHistory.positions.map((p) => [p.longitude, p.latitude]);
       if (allCoords.length >= 2) {
         allCoords.forEach((c) => bounds.extend(c as [number, number]));
         try {
@@ -825,7 +837,7 @@ export function TrackingMap() {
       map.once("style.load", renderLayers);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeHistory.segments, routeHistory.stops, routeHistory.positions, mapMode]);
+  }, [routeHistory.segments, routeHistory.stops, routeHistory.positions, routeHistory.baseLine, mapMode]);
 
   /* ── Playback animation ────────────────────────────── */
   useEffect(() => {
@@ -935,6 +947,28 @@ export function TrackingMap() {
     setHistoryDeviceId(deviceId);
     routeHistory.fetchHistory(deviceId, from, to);
   }, [clearHistoryLayers, routeHistory]);
+
+  /* ── Open a period from a link (reports, alerts, notifications) ── */
+  // /map?history=1&deviceId=&from=&to=
+  const searchParams = useSearchParams();
+  const linkedHistory = useMemo(() => {
+    const deviceId = searchParams.get("deviceId");
+    const from = new Date(searchParams.get("from") ?? "");
+    const to = new Date(searchParams.get("to") ?? "");
+    if (searchParams.get("history") !== "1" || !deviceId || isNaN(from.getTime()) || isNaN(to.getTime())) {
+      return null;
+    }
+    return { deviceId, from, to };
+  }, [searchParams]);
+
+  const openedLink = useRef<string | null>(null);
+  useEffect(() => {
+    const key = searchParams.toString();
+    if (!linkedHistory || openedLink.current === key) return;
+    openedLink.current = key;
+    switchToHistory();
+    handleHistorySearch(linkedHistory.deviceId, linkedHistory.from, linkedHistory.to);
+  }, [linkedHistory, searchParams, switchToHistory, handleHistorySearch]);
 
   const handleStopClick = useCallback((stop: StopEvent) => {
     mapRef.current?.flyTo({
@@ -1059,6 +1093,8 @@ export function TrackingMap() {
               segments={routeHistory.segments}
               onStopClick={handleStopClick}
               onSegmentClick={handleSegmentClick}
+              initialFrom={linkedHistory?.from}
+              initialTo={linkedHistory?.to}
             />
           ) : detailDevice ? (
             <DeviceDetailPanel
