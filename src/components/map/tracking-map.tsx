@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import maplibregl from "maplibre-gl";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { useSearchParams } from "next/navigation";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -29,6 +31,8 @@ import { HistoryPanel } from "./history-panel";
 import { PlaybackControls } from "./playback-controls";
 import { useRouteHistory, type StopEvent, type RouteSegment } from "@/hooks/useRouteHistory";
 import { advanceTime, positionAt, stepTo } from "@/lib/playback";
+import { vehicleIcon } from "@/lib/vehicle-icons";
+import { VehicleIcon } from "@/components/shared/vehicle-icon";
 
 /* ── constants ────────────────────────────────────────── */
 
@@ -72,22 +76,43 @@ function createArrowSvg(color: string, course: number): string {
   </svg>`;
 }
 
-function createDotSvg(color: string): string {
-  return `<svg width="22" height="22" viewBox="0 0 22 22">
-    <circle cx="11" cy="11" r="9" fill="${color}" fill-opacity="0.15" stroke="${color}" stroke-width="2"/>
-    <circle cx="11" cy="11" r="3.5" fill="${color}"/>
-  </svg>`;
+// White vehicle icon (truck, motorbike, car…) as SVG markup, made once per type
+const vehicleIconMarkup = new Map<string, string>();
+function vehicleIconSvg(type: string | null): string {
+  const key = type ?? "";
+  let markup = vehicleIconMarkup.get(key);
+  if (!markup) {
+    markup = renderToStaticMarkup(createElement(vehicleIcon(type), { size: 15, color: "#fff", strokeWidth: 2.25 }));
+    vehicleIconMarkup.set(key, markup);
+  }
+  return markup;
 }
 
-function createMarkerEl(color: string, course: number, isMoving: boolean): HTMLDivElement {
+// Live vehicle: a circle in its status color with its type's icon, and a pointer showing
+// its heading while it moves
+function vehicleMarkerHtml(color: string, course: number, isMoving: boolean, type: string | null): string {
+  const pointer = isMoving
+    ? `<svg width="34" height="34" viewBox="0 0 34 34" style="position:absolute;inset:0;transform:rotate(${course}deg)">
+        <path d="M17 0.5 L22.5 8 L11.5 8 Z" fill="${color}" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/>
+      </svg>`
+    : "";
+  return `<div style="position:relative;width:34px;height:34px">
+    ${pointer}
+    <div style="position:absolute;left:5px;top:5px;width:24px;height:24px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center">
+      ${vehicleIconSvg(type)}
+    </div>
+  </div>`;
+}
+
+function createMarkerEl(color: string, course: number, isMoving: boolean, type: string | null): HTMLDivElement {
   const el = document.createElement("div");
   el.style.cssText = "cursor:pointer;line-height:0;";
-  el.innerHTML = isMoving ? createArrowSvg(color, course) : createDotSvg(color);
+  el.innerHTML = vehicleMarkerHtml(color, course, isMoving, type);
   return el;
 }
 
-function updateMarkerEl(el: HTMLElement, color: string, course: number, isMoving: boolean): void {
-  el.innerHTML = isMoving ? createArrowSvg(color, course) : createDotSvg(color);
+function updateMarkerEl(el: HTMLElement, color: string, course: number, isMoving: boolean, type: string | null): void {
+  el.innerHTML = vehicleMarkerHtml(color, course, isMoving, type);
 }
 
 /* ── other helpers ────────────────────────────────────── */
@@ -349,9 +374,9 @@ export function TrackingMap() {
         if (popup && !popup.isOpen()) {
           popup.setHTML(popupHtml(pos));
         }
-        updateMarkerEl(existing.el, color, pos.course, isMoving);
+        updateMarkerEl(existing.el, color, pos.course, isMoving, tracked?.vehicleType ?? null);
       } else {
-        const el = createMarkerEl(color, pos.course, isMoving);
+        const el = createMarkerEl(color, pos.course, isMoving, tracked?.vehicleType ?? null);
         const popup = new maplibregl.Popup({ offset: 18, maxWidth: "260px" }).setHTML(
           popupHtml(pos)
         );
@@ -1395,7 +1420,7 @@ function DeviceRow({
             className="w-9 h-9 rounded-lg flex items-center justify-center"
             style={{ backgroundColor: `${color}15` }}
           >
-            <Truck className="w-4 h-4" style={{ color }} />
+            <VehicleIcon vehicleType={device.vehicleType} className="w-4 h-4" style={{ color }} />
           </div>
           {device.trackingStatus === "moving" && (
             <span

@@ -10,8 +10,6 @@ import {
   Clock,
   MapPin,
   Truck,
-  Car,
-  Bike,
   Crosshair,
   Route,
   Eye,
@@ -22,6 +20,8 @@ import {
   Loader2,
 } from "lucide-react";
 import type { TrackedDevice, DeviceTrackingStatus } from "@/hooks/usePositions";
+import { VehicleIcon } from "@/components/shared/vehicle-icon";
+import { vehicleIcon } from "@/lib/vehicle-icons";
 
 /* ── constants ────────────────────────────────────────── */
 
@@ -37,14 +37,6 @@ const STATUS_LABELS: Record<DeviceTrackingStatus, string> = {
   stopped: "Stopped",
   idle: "Idle",
   offline: "Offline",
-};
-
-const VEHICLE_ICONS: Record<string, typeof Truck> = {
-  truck: Truck,
-  van: Truck,
-  pickup: Car,
-  car: Car,
-  motorcycle: Bike,
 };
 
 /* ── helpers ──────────────────────────────────────────── */
@@ -139,7 +131,6 @@ export function DeviceDetailPanel({
   const color = STATUS_COLORS[device.trackingStatus];
   const statusLabel = STATUS_LABELS[device.trackingStatus];
   const hasPosition = !!device.position;
-  const VehicleIcon = VEHICLE_ICONS[device.vehicleType || "truck"] || Truck;
 
   const lat = device.position?.latitude;
   const lng = device.position?.longitude;
@@ -191,7 +182,7 @@ export function DeviceDetailPanel({
             className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
             style={{ backgroundColor: `${color}15` }}
           >
-            <VehicleIcon className="w-5 h-5" style={{ color }} />
+            <VehicleIcon vehicleType={device.vehicleType} className="w-5 h-5" style={{ color }} />
           </div>
 
           {/* Name + plate + status */}
@@ -361,7 +352,7 @@ export function DeviceDetailPanel({
 
         {/* ── Vehicle Info Card ──────────────────────── */}
         <Card>
-          <CardLabel icon={VehicleIcon} text="Vehicle Info" />
+          <CardLabel icon={vehicleIcon(device.vehicleType)} text="Vehicle Info" />
           <div className="mt-2 space-y-2">
             <InfoRow
               label="Type"
