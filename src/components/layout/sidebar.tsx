@@ -40,10 +40,11 @@ export function Sidebar({ role, userName }: { role: string; userName: string }) 
   const settingsActive = isActive("/settings");
 
   return (
+    // Pinned to the screen height so the links at the bottom stay visible on long pages
     <aside
       className={`${
         collapsed ? "w-[72px]" : "w-[240px]"
-      } bg-[#1E2A4A] min-h-screen flex flex-col gap-2 px-3 py-4 transition-all duration-200 ease-in-out relative overflow-visible`}
+      } bg-[#1E2A4A] sticky top-0 h-screen shrink-0 flex flex-col gap-2 px-3 py-4 transition-all duration-200 ease-in-out overflow-visible`}
     >
       {/* Collapse toggle */}
       <button
@@ -74,7 +75,7 @@ export function Sidebar({ role, userName }: { role: string; userName: string }) 
       <div className="h-px bg-white/10" />
 
       {/* Main Navigation */}
-      <nav className="flex-1 flex flex-col gap-0.5">
+      <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5">
         {mainNav.map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
