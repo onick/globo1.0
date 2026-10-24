@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { redis } from "@/lib/redis";
 import { db } from "@/lib/db";
+import { lastKnownPositions } from "@/lib/last-positions";
 
-// GET /api/positions — get current positions for tenant's devices
+// GET /api/positions — current position of each of the tenant's devices: live when it
+// reported in the last 5 minutes, otherwise the last one Traccar has
 export async function GET() {
   const session = await auth();
   if (!session)
@@ -27,13 +29,18 @@ export async function GET() {
     },
   });
 
-  // Get positions from Redis
+  // Live positions from the bridge (last 5 minutes); the rest at their last known place
+  const live = devices.length
+    ? await redis.mget(devices.map((d) => `device:pos:${d.traccarId}`))
+    : [];
+  const fallback = live.some((p) => p === null) ? await lastKnownPositions() : new Map();
+
   const positions = [];
-  for (const device of devices) {
-    const posData = await redis.get(`device:pos:${device.traccarId}`);
-    if (posData) {
+  for (const [i, device] of devices.entries()) {
+    const position = live[i] ? JSON.parse(live[i]!) : fallback.get(device.traccarId!);
+    if (position) {
       positions.push({
-        ...JSON.parse(posData),
+        ...position,
         deviceName: device.name,
         vehiclePlate: device.vehiclePlate,
         globoDeviceId: device.id,
