@@ -20,6 +20,7 @@
     "ioredis": "^5.10.0",
     "lucide-react": "^0.576.0",
     "mapbox-gl": "^3.19.0",
+    "maplibre-gl": "5.24.0",
     "next": "16.1.6",
     "next-auth": "^5.0.0-beta.30",
     "radix-ui": "^1.4.3",

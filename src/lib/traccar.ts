@@ -18,6 +18,16 @@ interface TraccarPosition {
   serverTime: string;
 }
 
+interface TraccarStop {
+  deviceId: number;
+  latitude: number;
+  longitude: number;
+  startTime: string;
+  endTime: string;
+  duration: number; // ms
+  address: string | null;
+}
+
 class TraccarClient {
   private baseUrl: string;
   private cookie: string | null = null;
@@ -95,6 +105,28 @@ class TraccarClient {
     return this.request<TraccarPosition[]>(`/positions${query}`);
   }
 
+  // History: every position a device reported between two dates
+  async getRoute(deviceId: number, from: Date, to: Date): Promise<TraccarPosition[]> {
+    const query = new URLSearchParams({
+      deviceId: String(deviceId),
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    return this.request<TraccarPosition[]>(`/positions?${query}`);
+  }
+
+  // History: stops Traccar detected between two dates
+  async getStops(deviceId: number, from: Date, to: Date): Promise<TraccarStop[]> {
+    const query = new URLSearchParams({
+      deviceId: String(deviceId),
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+    return this.request<TraccarStop[]>(`/reports/stops?${query}`, {
+      headers: { Accept: "application/json" },
+    });
+  }
+
   // WebSocket URL for real-time positions
   getWebSocketUrl(): string {
     return process.env.TRACCAR_WS_URL || "ws://localhost:8082/api/socket";
@@ -113,4 +145,4 @@ if (process.env.NODE_ENV !== "production") {
   globalForTraccar.traccar = traccar;
 }
 
-export type { TraccarDevice, TraccarPosition };
+export type { TraccarDevice, TraccarPosition, TraccarStop };
