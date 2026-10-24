@@ -3,15 +3,18 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
 import {
+  detectStops,
   knotsToKmh,
   parseRange,
   summarizeRoute,
   type RoutePoint,
   type RouteStop,
 } from "@/lib/history";
+import { matchRoute, type MatchedRoute } from "@/lib/map-matching";
 
 // GET /api/history?deviceId=<globo device id>&from=<ISO>&to=<ISO>
-// Route, stops and summary for one device over a time range.
+// Route, stops and summary for one device over a time range. With OSRM_URL set, the
+// route is snapped to the roads; otherwise it is the line between GPS fixes.
 export async function GET(request: Request) {
   const session = await auth();
   if (!session)
@@ -70,16 +73,34 @@ export async function GET(request: Request) {
       speedKmh: knotsToKmh(p.speed),
       course: p.course,
       time: p.fixTime,
+      snapped: null,
     }));
 
-  const stops: RouteStop[] = traccarStops.map((s) => ({
-    latitude: s.latitude,
-    longitude: s.longitude,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    durationMin: Math.round(s.duration / 60000),
-    address: s.address,
-  }));
+  let matched: MatchedRoute | null = null;
+  if (process.env.OSRM_URL) {
+    try {
+      matched = await matchRoute(
+        points,
+        process.env.OSRM_URL,
+        Number(process.env.OSRM_MATCH_MAX_POINTS) || undefined
+      );
+    } catch (err) {
+      // Fall back to the GPS line rather than failing the whole history
+      console.error("Map matching failed:", err);
+    }
+  }
+  matched?.snapped.forEach((location, i) => {
+    points[i].snapped = location;
+  });
+
+  // Stops come from the positions (Traccar's stops report returns nothing for long
+  // ranges); Traccar is only used for the address when it reports the same stop.
+  const stops: RouteStop[] = detectStops(points).map((stop) => {
+    const sameStop = traccarStops.find(
+      (s) => s.startTime < stop.endTime && s.endTime > stop.startTime
+    );
+    return { ...stop, address: sameStop?.address ?? null };
+  });
 
   return NextResponse.json({
     device: {
@@ -91,6 +112,7 @@ export async function GET(request: Request) {
     to: range.to.toISOString(),
     points,
     stops,
-    summary: summarizeRoute(points),
+    route: matched ? { snappedToRoads: true, segments: matched.segments } : null,
+    summary: summarizeRoute(points, matched ? matched.distanceKm : null),
   });
 }

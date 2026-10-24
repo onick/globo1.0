@@ -6,6 +6,8 @@ export interface RoutePoint {
   speedKmh: number;
   course: number;
   time: string;
+  // Position on the road network after map matching; null when not matched
+  snapped: [number, number] | null;
 }
 
 export interface RouteStop {
@@ -19,7 +21,11 @@ export interface RouteStop {
 
 export interface RouteSummary {
   points: number;
+  // Along the roads when the route was matched, otherwise between GPS fixes
   distanceKm: number;
+  distanceSource: "roads" | "gps";
+  // Straight lines between GPS fixes: undercounts on curves and turns
+  gpsDistanceKm: number;
   maxSpeedKmh: number;
   avgMovingSpeedKmh: number;
   durationMin: number;
@@ -27,6 +33,10 @@ export interface RouteSummary {
 
 // Longest range a single history request may cover.
 export const MAX_RANGE_DAYS = 7;
+
+// A stop is at least this long with the speed at or below the threshold.
+export const STOP_MIN_DURATION_MIN = 3;
+export const STOP_MAX_SPEED_KMH = 3;
 
 // Traccar reports speed in knots.
 export function knotsToKmh(knots: number): number {
@@ -48,7 +58,10 @@ export function haversineKm(
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h));
 }
 
-export function summarizeRoute(points: RoutePoint[]): RouteSummary {
+export function summarizeRoute(
+  points: RoutePoint[],
+  roadDistanceKm: number | null = null
+): RouteSummary {
   let distanceKm = 0;
   let maxSpeedKmh = 0;
   let movingSpeedSum = 0;
@@ -71,11 +84,50 @@ export function summarizeRoute(points: RoutePoint[]): RouteSummary {
 
   return {
     points: points.length,
-    distanceKm: round(distanceKm, 2),
+    distanceKm: round(roadDistanceKm ?? distanceKm, 2),
+    distanceSource: roadDistanceKm === null ? "gps" : "roads",
+    gpsDistanceKm: round(distanceKm, 2),
     maxSpeedKmh: round(maxSpeedKmh, 1),
     avgMovingSpeedKmh: movingCount ? round(movingSpeedSum / movingCount, 1) : 0,
     durationMin: Math.round(durationMin),
   };
+}
+
+// Stops from the positions themselves: runs of fixes at or below STOP_MAX_SPEED_KMH
+// lasting at least STOP_MIN_DURATION_MIN. Works the same for any date range.
+export function detectStops(points: RoutePoint[]): Omit<RouteStop, "address">[] {
+  const stops: Omit<RouteStop, "address">[] = [];
+  let start = -1;
+
+  // lastStopped: last fix of the run; end: fix that ends it (first moving fix, or the last one)
+  const close = (lastStopped: number, end: number) => {
+    const first = points[start];
+    const last = points[end];
+    const minutes = (new Date(last.time).getTime() - new Date(first.time).getTime()) / 60000;
+    if (minutes >= STOP_MIN_DURATION_MIN) {
+      const run = points.slice(start, lastStopped + 1);
+      stops.push({
+        latitude: run.reduce((sum, p) => sum + p.latitude, 0) / run.length,
+        longitude: run.reduce((sum, p) => sum + p.longitude, 0) / run.length,
+        startTime: first.time,
+        endTime: last.time,
+        durationMin: Math.round(minutes),
+      });
+    }
+  };
+
+  points.forEach((point, i) => {
+    const stopped = point.speedKmh <= STOP_MAX_SPEED_KMH;
+    if (stopped && start === -1) start = i;
+    if (!stopped && start !== -1) {
+      // The stop lasts until the vehicle starts moving again
+      close(i - 1, i);
+      start = -1;
+    }
+  });
+  if (start !== -1) close(points.length - 1, points.length - 1);
+
+  return stops;
 }
 
 // Validates the from/to query params. Returns an error message or the parsed dates.

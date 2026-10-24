@@ -6,9 +6,15 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { OSM_STYLE } from "@/lib/map-style";
 import type { RoutePoint, RouteStop } from "@/lib/history";
 
+type LngLat = [number, number];
+
 interface RouteMapProps {
   points: RoutePoint[];
   stops: RouteStop[];
+  // Route snapped to the roads, one line per continuous stretch; null when not matched
+  segments: LngLat[][] | null;
+  snapToRoads: boolean;
+  showGpsPoints: boolean;
   currentIndex: number;
 }
 
@@ -22,12 +28,37 @@ function stopPopupHtml(stop: RouteStop) {
   `;
 }
 
-export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
+function gpsPopupHtml(point: RoutePoint) {
+  return `
+    <div style="font-family: sans-serif; font-size: 12px;">
+      ${new Date(point.time).toLocaleString()}<br/>${Math.round(point.speedKmh)} km/h
+    </div>
+  `;
+}
+
+export function RouteMap({
+  points,
+  stops,
+  segments,
+  snapToRoads,
+  showGpsPoints,
+  currentIndex,
+}: RouteMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const overlayMarkersRef = useRef<maplibregl.Marker[]>([]);
   const vehicleRef = useRef<maplibregl.Marker | null>(null);
+
+  const useRoads = snapToRoads && segments !== null;
+  const position = (p: RoutePoint): LngLat =>
+    useRoads && p.snapped ? p.snapped : [p.longitude, p.latitude];
+
+  // Latest points for the GPS popup handler registered once on load
+  const pointsRef = useRef(points);
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
 
   // Initialize map
   useEffect(() => {
@@ -42,16 +73,35 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
     map.on("load", () => {
-      map.addSource("route", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
+      const empty = { type: "FeatureCollection" as const, features: [] };
+      map.addSource("route", { type: "geojson", data: empty });
       map.addLayer({
         id: "route-line",
         type: "line",
         source: "route",
         layout: { "line-join": "round", "line-cap": "round" },
         paint: { "line-color": "#2563eb", "line-width": 4, "line-opacity": 0.8 },
+      });
+      map.addSource("gps-points", { type: "geojson", data: empty });
+      map.addLayer({
+        id: "gps-points",
+        type: "circle",
+        source: "gps-points",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": 3.5,
+          "circle-color": "#f97316",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1,
+        },
+      });
+      map.on("click", "gps-points", (e) => {
+        const index = e.features?.[0]?.properties?.index;
+        if (typeof index !== "number") return;
+        new maplibregl.Popup({ offset: 8 })
+          .setLngLat(e.lngLat)
+          .setHTML(gpsPopupHtml(pointsRef.current[index]))
+          .addTo(map);
       });
       setMapReady(true);
     });
@@ -65,7 +115,7 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
     };
   }, []);
 
-  // Draw route, start/end and stops whenever a new history loads
+  // Route line: along the roads when matched and enabled, else straight between fixes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -78,14 +128,40 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
             {
               type: "Feature",
               properties: {},
-              geometry: {
-                type: "LineString",
-                coordinates: points.map((p) => [p.longitude, p.latitude]),
-              },
+              geometry:
+                useRoads && segments
+                  ? { type: "MultiLineString", coordinates: segments }
+                  : {
+                      type: "LineString",
+                      coordinates: points.map((p) => [p.longitude, p.latitude]),
+                    },
             },
           ]
         : [],
     });
+  }, [points, segments, useRoads, mapReady]);
+
+  // Raw GPS fixes, to audit the route against what the device actually reported
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const source = map.getSource("gps-points") as GeoJSONSource | undefined;
+    source?.setData({
+      type: "FeatureCollection",
+      features: points.map((p, index) => ({
+        type: "Feature",
+        properties: { index },
+        geometry: { type: "Point", coordinates: [p.longitude, p.latitude] },
+      })),
+    });
+    map.setLayoutProperty("gps-points", "visibility", showGpsPoints ? "visible" : "none");
+  }, [points, showGpsPoints, mapReady]);
+
+  // Start, end and stop markers; fit the map whenever a new history loads
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
 
     overlayMarkersRef.current.forEach((m) => m.remove());
     overlayMarkersRef.current = [];
@@ -95,11 +171,11 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
     const last = points[points.length - 1];
     overlayMarkersRef.current.push(
       new maplibregl.Marker({ color: "#16a34a" })
-        .setLngLat([first.longitude, first.latitude])
+        .setLngLat(position(first))
         .setPopup(new maplibregl.Popup({ offset: 25 }).setText("Start"))
         .addTo(map),
       new maplibregl.Marker({ color: "#dc2626" })
-        .setLngLat([last.longitude, last.latitude])
+        .setLngLat(position(last))
         .setPopup(new maplibregl.Popup({ offset: 25 }).setText("End"))
         .addTo(map)
     );
@@ -120,7 +196,9 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
     const bounds = new maplibregl.LngLatBounds();
     points.forEach((p) => bounds.extend([p.longitude, p.latitude]));
     map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 0 });
-  }, [points, stops, mapReady]);
+    // position() only depends on useRoads, already listed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, stops, useRoads, mapReady]);
 
   // Move the vehicle marker during playback
   useEffect(() => {
@@ -132,7 +210,7 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
       return;
     }
 
-    const lngLat: [number, number] = [point.longitude, point.latitude];
+    const lngLat = position(point);
     if (!vehicleRef.current) {
       const el = document.createElement("div");
       el.className = "h-4 w-4 rounded-full bg-blue-600 border-2 border-white shadow-lg";
@@ -140,7 +218,8 @@ export function RouteMap({ points, stops, currentIndex }: RouteMapProps) {
     } else {
       vehicleRef.current.setLngLat(lngLat);
     }
-  }, [points, currentIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, currentIndex, useRoads]);
 
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden border">

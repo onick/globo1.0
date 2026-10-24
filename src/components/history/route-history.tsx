@@ -15,6 +15,7 @@ interface DeviceOption {
 interface HistoryResponse {
   points: RoutePoint[];
   stops: RouteStop[];
+  route: { snappedToRoads: boolean; segments: [number, number][][] } | null;
   summary: RouteSummary;
 }
 
@@ -57,6 +58,8 @@ export function RouteHistory() {
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [snapToRoads, setSnapToRoads] = useState(true);
+  const [showGpsPoints, setShowGpsPoints] = useState(false);
 
   useEffect(() => {
     fetch("/api/devices")
@@ -199,7 +202,10 @@ export function RouteHistory() {
       {history && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
-            ["Distance", `${history.summary.distanceKm} km`],
+            [
+              history.summary.distanceSource === "roads" ? "Distance (roads)" : "Distance (GPS)",
+              `${history.summary.distanceKm} km`,
+            ],
             ["Duration", `${history.summary.durationMin} min`],
             ["Max speed", `${history.summary.maxSpeedKmh} km/h`],
             ["Avg moving speed", `${history.summary.avgMovingSpeedKmh} km/h`],
@@ -213,8 +219,47 @@ export function RouteHistory() {
         </div>
       )}
 
+      {history && points.length > 0 && (
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={snapToRoads}
+              disabled={!history.route}
+              onChange={(e) => setSnapToRoads(e.target.checked)}
+            />
+            Snap to roads
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={showGpsPoints}
+              onChange={(e) => setShowGpsPoints(e.target.checked)}
+            />
+            Show GPS points ({points.length})
+          </label>
+          {!history.route && (
+            <span className="text-amber-700">
+              Road matching unavailable: the line joins GPS fixes and may cut corners.
+            </span>
+          )}
+          {history.route && (
+            <span className="text-zinc-500">
+              Straight lines between GPS fixes: {history.summary.gpsDistanceKm} km
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="relative flex-1 min-h-80">
-        <RouteMap points={points} stops={history?.stops ?? []} currentIndex={index} />
+        <RouteMap
+          points={points}
+          stops={history?.stops ?? []}
+          segments={history?.route?.segments ?? null}
+          snapToRoads={snapToRoads}
+          showGpsPoints={showGpsPoints}
+          currentIndex={index}
+        />
         {history && points.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="bg-white px-4 py-2 rounded-md shadow text-sm">
