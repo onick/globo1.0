@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import maplibregl from "maplibre-gl";
+import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useSearchParams } from "next/navigation";
@@ -32,6 +32,7 @@ import { PlaybackControls } from "./playback-controls";
 import { useRouteHistory, type StopEvent, type RouteSegment } from "@/hooks/useRouteHistory";
 import { advanceTime, positionAt, stepTo } from "@/lib/playback";
 import { vehicleIcon } from "@/lib/vehicle-icons";
+import { clusterSize, donutArcs } from "@/lib/cluster-donut";
 import { VehicleIcon } from "@/components/shared/vehicle-icon";
 
 /* ── constants ────────────────────────────────────────── */
@@ -118,6 +119,28 @@ function updateMarkerEl(el: HTMLElement, color: string, course: number, isMoving
   el.innerHTML = vehicleMarkerHtml(color, course, isMoving, type);
 }
 
+// Cluster of vehicles: how many, with a ring split by their statuses
+const CLUSTER_STATUSES = ["moving", "stopped", "idle", "offline"] as const;
+function clusterHtml(counts: Record<string, number>, total: number): string {
+  const size = clusterSize(total);
+  const mid = size / 2;
+  const r = mid - 3;
+  const circumference = 2 * Math.PI * r;
+  const arcs = donutArcs(counts, CLUSTER_STATUSES)
+    .map(
+      (a) =>
+        `<circle cx="${mid}" cy="${mid}" r="${r}" fill="none" stroke="${STATUS_COLORS[a.key as DeviceTrackingStatus]}" stroke-width="5" stroke-dasharray="${a.length * circumference} ${circumference}" stroke-dashoffset="${-a.start * circumference}" transform="rotate(-90 ${mid} ${mid})"/>`
+    )
+    .join("");
+  return `<div style="position:relative;width:${size}px;height:${size}px;cursor:pointer;filter:drop-shadow(0 1px 2px rgba(15,23,42,.3))">
+    <svg width="${size}" height="${size}" style="position:absolute;inset:0"><circle cx="${mid}" cy="${mid}" r="${r}" fill="#fff"/>${arcs}</svg>
+    <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:600 12px system-ui;color:#0F172A">${total}</span>
+  </div>`;
+}
+
+// Clustering counts each status inside every cluster
+const statusCount = (status: DeviceTrackingStatus) => ["+", ["case", ["==", ["get", "status"], status], 1, 0]];
+
 /* ── other helpers ────────────────────────────────────── */
 
 function popupHtml(pos: {
@@ -202,6 +225,10 @@ export function TrackingMap() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<Map<number, { marker: maplibregl.Marker; el: HTMLDivElement }>>(new Map());
+  // Cluster markers on screen, by cluster id
+  const clusterMarkersRef = useRef<Map<number, maplibregl.Marker>>(new Map());
+  // Bumped on every style load: sources and layers have to be added again
+  const [styleVersion, setStyleVersion] = useState(0);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   // Traccar ids of the live trails drawn on the map
@@ -283,6 +310,7 @@ export function TrackingMap() {
     });
 
     mapRef.current.addControl(new maplibregl.NavigationControl(), "top-right");
+    mapRef.current.on("style.load", () => setStyleVersion((v) => v + 1));
 
     // Stop following if user manually drags the map
     mapRef.current.on("dragstart", () => {
@@ -402,13 +430,116 @@ export function TrackingMap() {
     });
   }, [positions, devices]);
 
-  // History shows only the replayed vehicle: hundreds of live markers would bury its route
+  /* ── clusters: nearby vehicles grouped, like Trakzee ── */
+  // The vehicles also go to a clustered GeoJSON source: where they crowd together the map
+  // shows a cluster (how many, by status) instead of hundreds of overlapping markers
   useEffect(() => {
-    const hidden = mapMode === "history";
-    markersRef.current.forEach(({ el }) => {
-      el.style.display = hidden ? "none" : "";
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const deviceMap = new Map(devices.map((d) => [d.traccarId, d]));
+    const data: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: positions.map((pos) => ({
+        type: "Feature",
+        properties: { deviceId: pos.deviceId, status: deviceMap.get(pos.deviceId)?.trackingStatus ?? "offline" },
+        geometry: { type: "Point", coordinates: [pos.longitude, pos.latitude] },
+      })),
+    };
+    const source = map.getSource("vehicles") as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(data);
+      return;
+    }
+    map.addSource("vehicles", {
+      type: "geojson",
+      data,
+      cluster: true,
+      clusterRadius: 50,
+      clusterMaxZoom: 14,
+      clusterProperties: Object.fromEntries(CLUSTER_STATUSES.map((st) => [st, statusCount(st)])),
     });
-  }, [mapMode, positions, devices]);
+    // Invisible: it only makes the map load the source so clusters can be read from it
+    map.addLayer({ id: "vehicles-index", type: "circle", source: "vehicles", paint: { "circle-radius": 0, "circle-opacity": 0 } });
+  }, [positions, devices, styleVersion]);
+
+  // What to show is decided on every render of the map: clusters and lone vehicles in
+  // view, the selected or followed vehicle always, and nothing live in history mode
+  const visibilityRef = useRef<{ history: boolean; keep: Set<number> }>({ history: false, keep: new Set() });
+  const updateVisibility = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const { history, keep } = visibilityRef.current;
+    const loneVehicles = new Set<number>();
+    const clusters = new Map<number, maplibregl.Marker>();
+
+    if (!history && map.getSource("vehicles")) {
+      for (const feature of map.querySourceFeatures("vehicles")) {
+        const props = feature.properties as Record<string, number>;
+        if (!props.cluster) {
+          loneVehicles.add(props.deviceId);
+          continue;
+        }
+        const id = props.cluster_id;
+        if (clusters.has(id)) continue;
+        const coordinates = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
+        const html = clusterHtml(props, props.point_count);
+        let marker = clusterMarkersRef.current.get(id);
+        if (!marker) {
+          const el = document.createElement("div");
+          el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            (map.getSource("vehicles") as GeoJSONSource)
+              .getClusterExpansionZoom(id)
+              .then((zoom) => map.easeTo({ center: coordinates, zoom }));
+          });
+          marker = new maplibregl.Marker({ element: el }).setLngLat(coordinates).addTo(map);
+        }
+        const el = marker.getElement();
+        if (el.dataset.html !== html) {
+          el.innerHTML = html;
+          el.dataset.html = html;
+        }
+        clusters.set(id, marker);
+      }
+    }
+
+    clusterMarkersRef.current.forEach((marker, id) => {
+      if (!clusters.has(id)) marker.remove();
+    });
+    clusterMarkersRef.current = clusters;
+    markersRef.current.forEach(({ el }, deviceId) => {
+      const shown = !history && (loneVehicles.has(deviceId) || keep.has(deviceId));
+      el.style.display = shown ? "" : "none";
+    });
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    let scheduled = false;
+    const onRender = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        updateVisibility();
+      });
+    };
+    map.on("render", onRender);
+    return () => {
+      map.off("render", onRender);
+    };
+  }, [updateVisibility]);
+
+  useEffect(() => {
+    // The vehicle picked in the list, opened or followed stays visible even inside a cluster
+    const keepIds = [selectedDeviceId, detailDevice?.id, followingDeviceId].filter(Boolean);
+    visibilityRef.current = {
+      history: mapMode === "history",
+      keep: new Set(devices.filter((d) => keepIds.includes(d.id) && d.traccarId).map((d) => d.traccarId!)),
+    };
+    updateVisibility();
+  }, [mapMode, selectedDeviceId, followingDeviceId, detailDevice, devices, positions, updateVisibility]);
 
   /* ── live trails: each reporting vehicle's last minutes, along the roads ── */
   // Matched to the streets on the server (/api/positions/trails): joining the live
