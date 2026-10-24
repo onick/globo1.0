@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   ChevronLeft,
   Phone,
@@ -18,10 +19,19 @@ import {
   User,
   Radio,
   Loader2,
+  Pencil,
+  Bell,
+  Cpu,
+  CalendarDays,
+  Settings2,
+  ExternalLink,
+  LogIn,
+  LogOut,
+  Milestone,
 } from "lucide-react";
+import { trackerModel } from "@/lib/trackers";
 import type { TrackedDevice, DeviceTrackingStatus } from "@/hooks/usePositions";
 import { VehicleIcon } from "@/components/shared/vehicle-icon";
-import { vehicleIcon } from "@/lib/vehicle-icons";
 
 /* ── constants ────────────────────────────────────────── */
 
@@ -69,6 +79,54 @@ function timeAgo(dateStr: string): string {
   const hrs = Math.floor(min / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// "27 min", "1 h 05 min", "2 d 3 h"
+function durationSince(iso: string): string {
+  const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h ${String(min % 60).padStart(2, "0")} min`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+
+const km = (value: number) => `${value.toLocaleString("en-US", { maximumFractionDigits: 1 })} km`;
+const hours = (minutes: number) =>
+  minutes < 60 ? `${Math.round(minutes)} min` : `${(minutes / 60).toLocaleString("en-US", { maximumFractionDigits: 1 })} h`;
+
+interface VehicleOverview {
+  state: { moving: boolean; since: string; currentTripKm: number } | null;
+  today: { distanceKm: number; drivingMin: number; trips: number; stops: number; maxSpeedKmh: number };
+  odometerKm: number | null;
+  connection: { status: string; lastUpdate: string | null } | null;
+  tracker: { model: string | null; simNumber: string | null; simCarrier: string | null };
+  alerts: {
+    today: number;
+    recent: {
+      id: string;
+      type: "geofence_enter" | "geofence_exit" | "overspeed";
+      time: string;
+      speedKmh: number;
+      limitKmh: number | null;
+      readAt: string | null;
+      geofence: { name: string } | null;
+    }[];
+  };
+  permissions: { editDriver: boolean; configure: boolean };
+}
+
+const OVERVIEW_REFRESH_MS = 30_000;
+
+async function fetchOverview(id: string): Promise<VehicleOverview | null> {
+  const res = await fetch(`/api/devices/${id}/overview`);
+  return res.ok ? res.json() : null;
+}
+
+const ALERT_ICONS = { geofence_enter: LogIn, geofence_exit: LogOut, overspeed: Gauge };
+function alertText(a: VehicleOverview["alerts"]["recent"][number]) {
+  if (a.type === "overspeed") return `Speeding · ${Math.round(a.speedKmh)} km/h${a.limitKmh ? ` (limit ${a.limitKmh})` : ""}`;
+  const where = a.geofence?.name ?? "deleted geofence";
+  return a.type === "geofence_enter" ? `Entered ${where}` : `Left ${where}`;
 }
 
 function getInitials(name: string): string {
@@ -127,6 +185,33 @@ export function DeviceDetailPanel({
   // address arrives, without resetting state from the effect
   const [resolved, setResolved] = useState<{ key: string; address: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [overview, setOverview] = useState<{ id: string; data: VehicleOverview } | null>(null);
+  // Driver as just saved, until the device list catches up
+  const [savedDriver, setSavedDriver] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
+  const [editingDriver, setEditingDriver] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = () =>
+      fetchOverview(device.id).then((data) => {
+        if (active && data) setOverview({ id: device.id, data });
+      });
+    load();
+    const timer = setInterval(load, OVERVIEW_REFRESH_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [device.id]);
+
+  const info = overview?.id === device.id ? overview.data : null;
+  // "Moving for…" and the trip in progress only hold while it keeps reporting
+  const reportingNow = device.trackingStatus === "moving" || device.trackingStatus === "stopped";
+  const state = reportingNow ? info?.state ?? null : null;
+  const driver =
+    savedDriver?.id === device.id
+      ? { name: savedDriver.name, phone: savedDriver.phone }
+      : { name: device.driverName, phone: device.driverPhone };
 
   const color = STATUS_COLORS[device.trackingStatus];
   const statusLabel = STATUS_LABELS[device.trackingStatus];
@@ -203,58 +288,87 @@ export function DeviceDetailPanel({
                 {device.vehiclePlate}
               </p>
             )}
+            {/* What it is doing and for how long, like "Stopped for 27 min" */}
+            <p className="text-[12px] mt-1" style={{ color }}>
+              {state
+                ? `${state.moving ? "Moving" : "Stopped"} for ${durationSince(state.since)}`
+                : device.lastUpdate
+                  ? `No reports for ${durationSince(device.lastUpdate)}`
+                  : "Never reported"}
+            </p>
           </div>
         </div>
       </div>
 
       {/* ── Scrollable content ────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {/* ── Today ──────────────────────────────────── */}
+        <Card>
+          <CardLabel icon={CalendarDays} text="Today" />
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <StatTile icon={Route} label="Distance" value={info ? km(info.today.distanceKm) : "—"} />
+            <StatTile icon={Clock} label="Driving" value={info ? hours(info.today.drivingMin) : "—"} />
+            <StatTile icon={Milestone} label="Trips" value={info ? String(info.today.trips) : "—"} />
+            <StatTile icon={MapPin} label="Stops" value={info ? String(info.today.stops) : "—"} />
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {state?.moving && (
+              <InfoRow label="Current trip" value={`${km(state.currentTripKm)} · since ${new Date(state.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`} />
+            )}
+            <InfoRow label="Odometer (GPS)" value={info?.odometerKm != null ? km(info.odometerKm) : "—"} mono />
+          </div>
+        </Card>
+
         {/* ── Driver Card ────────────────────────────── */}
         <Card>
-          <CardLabel icon={User} text="Driver" />
-          {device.driverName ? (
+          <div className="flex items-center justify-between">
+            <CardLabel icon={User} text="Driver" />
+            {info?.permissions.editDriver && !editingDriver && (
+              <button
+                onClick={() => setEditingDriver(true)}
+                className="text-[#94A3B8] hover:text-[#2563EB] p-1 -m-1"
+                aria-label="Edit driver"
+                title="Edit driver"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          {editingDriver ? (
+            <DriverForm
+              deviceId={device.id}
+              name={driver.name}
+              phone={driver.phone}
+              onCancel={() => setEditingDriver(false)}
+              onSaved={(name, phone) => {
+                setSavedDriver({ id: device.id, name, phone });
+                setEditingDriver(false);
+              }}
+            />
+          ) : driver.name ? (
             <div className="flex items-center gap-3 mt-2">
-              {/* Avatar */}
               <div className="w-10 h-10 rounded-full bg-[#2563EB] flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-[13px] font-bold">
-                  {getInitials(device.driverName)}
-                </span>
+                <span className="text-white text-[13px] font-bold">{getInitials(driver.name)}</span>
               </div>
-
-              {/* Name */}
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-[#0F172A] truncate">
-                  {device.driverName}
-                </p>
-                {device.driverPhone && (
-                  <p className="text-[11px] text-[#94A3B8]">
-                    {device.driverPhone}
-                  </p>
-                )}
+                <p className="text-[13px] font-medium text-[#0F172A] truncate">{driver.name}</p>
+                {driver.phone && <p className="text-[11px] text-[#94A3B8]">{driver.phone}</p>}
               </div>
-
-              {/* Action buttons */}
-              {device.driverPhone && (
+              {driver.phone && (
                 <div className="flex gap-1.5 flex-shrink-0">
                   <a
-                    href={`tel:${device.driverPhone}`}
+                    href={`tel:${driver.phone}`}
                     className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-                    style={{
-                      backgroundColor: "rgba(22,163,74,0.1)",
-                      color: "#16A34A",
-                    }}
-                    title={`Call ${device.driverName}`}
+                    style={{ backgroundColor: "rgba(22,163,74,0.1)", color: "#16A34A" }}
+                    title={`Call ${driver.name}`}
                   >
                     <Phone className="w-3.5 h-3.5" />
                   </a>
                   <a
-                    href={`sms:${device.driverPhone}`}
+                    href={`sms:${driver.phone}`}
                     className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-                    style={{
-                      backgroundColor: "rgba(37,99,235,0.1)",
-                      color: "#2563EB",
-                    }}
-                    title={`Message ${device.driverName}`}
+                    style={{ backgroundColor: "rgba(37,99,235,0.1)", color: "#2563EB" }}
+                    title={`Message ${driver.name}`}
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                   </a>
@@ -262,9 +376,7 @@ export function DeviceDetailPanel({
               )}
             </div>
           ) : (
-            <p className="text-[12px] text-[#94A3B8] mt-2 italic">
-              No driver assigned
-            </p>
+            <p className="text-[12px] text-[#94A3B8] mt-2 italic">No driver assigned</p>
           )}
         </Card>
 
@@ -350,32 +462,95 @@ export function DeviceDetailPanel({
           </div>
         </Card>
 
-        {/* ── Vehicle Info Card ──────────────────────── */}
+        {/* ── GPS tracker ────────────────────────────── */}
         <Card>
-          <CardLabel icon={vehicleIcon(device.vehicleType)} text="Vehicle Info" />
+          <CardLabel icon={Cpu} text="GPS Tracker" />
           <div className="mt-2 space-y-2">
+            <InfoRow label="Model" value={trackerModel(info?.tracker.model)?.name ?? "Not set"} />
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] text-[#94A3B8]">Connection</span>
+              {info?.connection ? (
+                <span
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                    info.connection.status === "online" ? "bg-[#DCFCE7] text-[#15803D]" : "bg-[#F1F5F9] text-[#64748B]"
+                  }`}
+                >
+                  {info.connection.status === "online" ? "Connected" : info.connection.status === "offline" ? "Disconnected" : "No recent data"}
+                </span>
+              ) : (
+                <span className="text-[12px] text-[#0F172A]">—</span>
+              )}
+            </div>
             <InfoRow
-              label="Type"
+              label="Last report"
               value={
-                device.vehicleType
-                  ? device.vehicleType.charAt(0).toUpperCase() +
-                    device.vehicleType.slice(1)
-                  : "Not specified"
+                device.lastUpdate
+                  ? `${timeAgo(device.lastUpdate)} · ${new Date(device.lastUpdate).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
+                  : "Never"
               }
             />
             <InfoRow label="IMEI" value={device.imei} mono />
-            {device.vehiclePlate && (
-              <InfoRow label="Plate" value={device.vehiclePlate} />
-            )}
-            {device.traccarId && (
-              <InfoRow
-                label="Traccar ID"
-                value={String(device.traccarId)}
-                mono
-              />
-            )}
-            <InfoRow label="Device Status" value={device.status} />
+            <InfoRow
+              label="SIM"
+              value={info?.tracker.simNumber ? `${info.tracker.simNumber}${info.tracker.simCarrier ? ` · ${info.tracker.simCarrier}` : ""}` : "Not set"}
+              mono={!!info?.tracker.simNumber}
+            />
+            <InfoRow label="Device status" value={device.status} />
           </div>
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            {info?.permissions.configure && (
+              <Link
+                href={`/devices/${device.id}?tab=commands`}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium bg-white text-[#64748B] hover:bg-[#E2E8F0] border border-[#E2E8F0]"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                Setup & SMS
+              </Link>
+            )}
+            <Link
+              href={`/devices/${device.id}`}
+              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium bg-white text-[#64748B] hover:bg-[#E2E8F0] border border-[#E2E8F0] ${
+                info?.permissions.configure ? "" : "col-span-2"
+              }`}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              More details
+            </Link>
+          </div>
+        </Card>
+
+        {/* ── Alerts ─────────────────────────────────── */}
+        <Card>
+          <div className="flex items-center justify-between">
+            <CardLabel icon={Bell} text="Alerts" />
+            <span className="text-[11px] text-[#94A3B8]">{info ? `${info.alerts.today} today` : ""}</span>
+          </div>
+          {!info ? (
+            <p className="text-[12px] text-[#94A3B8] mt-2">—</p>
+          ) : info.alerts.recent.length === 0 ? (
+            <p className="text-[12px] text-[#94A3B8] mt-2 italic">No alerts yet</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {info.alerts.recent.map((a) => {
+                const Icon = ALERT_ICONS[a.type];
+                return (
+                  <li key={a.id} className="flex items-center gap-2">
+                    <Icon className={`w-3.5 h-3.5 shrink-0 ${a.type === "overspeed" ? "text-[#EF4444]" : "text-[#2563EB]"}`} />
+                    <span className={`text-[12px] flex-1 truncate ${a.readAt ? "text-[#64748B]" : "text-[#0F172A] font-medium"}`}>
+                      {alertText(a)}
+                    </span>
+                    <span className="text-[11px] text-[#94A3B8] shrink-0">{timeAgo(a.time)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <Link
+            href={`/alerts?deviceId=${device.id}`}
+            className="block text-[12px] font-medium text-[#2563EB] hover:underline mt-2.5"
+          >
+            View all alerts
+          </Link>
         </Card>
 
         {/* ── Quick Actions ──────────────────────────── */}
@@ -531,5 +706,62 @@ function ActionButton({
       )}
       {label}
     </button>
+  );
+}
+
+function DriverForm({
+  deviceId,
+  name,
+  phone,
+  onCancel,
+  onSaved,
+}: {
+  deviceId: string;
+  name: string | null;
+  phone: string | null;
+  onCancel: () => void;
+  onSaved: (name: string | null, phone: string | null) => void;
+}) {
+  const [driverName, setDriverName] = useState(name ?? "");
+  const [driverPhone, setDriverPhone] = useState(phone ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    const body = { driverName: driverName.trim() || null, driverPhone: driverPhone.trim() || null };
+    const res = await fetch(`/api/devices/${deviceId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (res.ok) onSaved(body.driverName, body.driverPhone);
+    else setError((await res.json().catch(() => ({}))).error || "Could not save the driver");
+  }
+
+  const input =
+    "w-full px-2.5 py-1.5 text-[12px] bg-white border border-[#E2E8F0] rounded-lg text-[#0F172A] placeholder:text-[#CBD5E1] focus:outline-none focus:ring-1 focus:ring-[#2563EB]";
+  return (
+    <form onSubmit={save} className="mt-2 space-y-2">
+      <input className={input} value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Driver's name" autoFocus />
+      <input className={input} value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="Phone, e.g. +18095551234" type="tel" />
+      {error && <p className="text-[11px] text-red-600">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium bg-[#2563EB] text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+        >
+          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          Save
+        </button>
+        <button type="button" onClick={onCancel} className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-[#64748B] hover:bg-[#E2E8F0]">
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

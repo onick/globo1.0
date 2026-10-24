@@ -29,6 +29,7 @@ vi.mock("@/lib/traccar", () => {
     traccar: {
       getRoute: vi.fn(async () => []),
       getDevices: vi.fn(async () => []),
+      getDevice: vi.fn(async (id: number) => ({ id, status: "online", lastUpdate: new Date().toISOString(), positionId: null })),
       getPositionsById: vi.fn(async () => []),
       getStops: vi.fn(async () => []),
       createDevice: vi.fn(async () => ({ id: nextId++ })),

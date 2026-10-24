@@ -91,6 +91,10 @@ class TraccarClient {
     return this.request<TraccarDevice[]>("/devices");
   }
 
+  async getDevice(id: number): Promise<TraccarDevice> {
+    return this.request<TraccarDevice>(`/devices/${id}`);
+  }
+
   async createDevice(name: string, uniqueId: string): Promise<TraccarDevice> {
     return this.request<TraccarDevice>("/devices", {
       method: "POST",

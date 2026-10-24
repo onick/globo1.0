@@ -6,6 +6,7 @@ import { call, seedTwoTenants, signInAs } from "./helpers";
 import * as devices from "@/app/api/devices/route";
 import * as device from "@/app/api/devices/[id]/route";
 import * as deviceImei from "@/app/api/devices/[id]/imei/route";
+import * as overview from "@/app/api/devices/[id]/overview/route";
 import * as alertsRead from "@/app/api/alerts/read/route";
 import * as geofences from "@/app/api/geofences/route";
 import * as geofence from "@/app/api/geofences/[id]/route";
@@ -83,6 +84,11 @@ describe.each(["admin", "operator", "viewer"] as const)("%s", (role) => {
   it("can update their own profile", async () => {
     const { status } = await call(profile.PATCH, { method: "PATCH", body: { name: `New ${role} name` } });
     expect(status).toBe(200);
+  });
+
+  it("sees in the vehicle panel what it may change", async () => {
+    const { body } = await call(overview.GET, { params: { id: w.a.device.id } });
+    expect(body.permissions).toEqual({ editDriver: can(role, "vehicles:edit"), configure: can(role, "vehicles:configure") });
   });
 
   it("can read everything in their client", async () => {

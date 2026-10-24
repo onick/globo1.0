@@ -6,6 +6,7 @@ import { call, seedTwoTenants, signInAs } from "./helpers";
 import * as devices from "@/app/api/devices/route";
 import * as device from "@/app/api/devices/[id]/route";
 import * as deviceImei from "@/app/api/devices/[id]/imei/route";
+import * as overview from "@/app/api/devices/[id]/overview/route";
 import * as positions from "@/app/api/positions/route";
 import * as trails from "@/app/api/positions/trails/route";
 import { traccar } from "@/lib/traccar";
@@ -124,6 +125,22 @@ describe("live trails", () => {
 });
 
 describe("a client can't read another client's vehicle", () => {
+  it("vehicle panel overview", async () => {
+    signInAs(w.a.viewer);
+    const own = await call(overview.GET, { params: { id: w.a.device.id } });
+    expect(own.status).toBe(200);
+    expect(own.body.alerts).toMatchObject({ today: 1 });
+    const other = await call(overview.GET, { params: { id: w.b.device.id } });
+    expect(other.status).toBe(404);
+    expectNoDataOf(other.body, w.b);
+  });
+
+  it("alerts filtered by another client's vehicle find nothing", async () => {
+    signInAs(w.a.admin);
+    expect((await call(alerts.GET, { path: `/api/alerts?deviceId=${w.a.device.id}` })).body.map((a: { id: string }) => a.id)).toEqual([w.a.alert.id]);
+    expect((await call(alerts.GET, { path: `/api/alerts?deviceId=${w.b.device.id}` })).body).toEqual([]);
+  });
+
   it("detail page", async () => {
     signInAs(w.a.admin);
     expect((await call(device.GET, { params: { id: w.a.device.id } })).status).toBe(200);
