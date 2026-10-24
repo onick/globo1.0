@@ -61,6 +61,14 @@ $C --profile tools build && $C --profile tools run --rm tools npx prisma migrate
 
 `last-success` guarda la hora de la última copia correcta.
 
+Hoy el destino es otro servidor por SFTP: un remoto de rclone creado así.
+
+```bash
+rclone config create globo-offsite sftp host=<servidor> user=root key_file=/root/.ssh/id_ed25519 known_hosts_file=/root/.ssh/known_hosts shell_type=unix
+```
+
+En `backup.env`: `BACKUP_RCLONE_REMOTE=globo-offsite:/root/globo-backups`. Para comprobar que una copia llegó entera: `rclone check /root/globo-backups/<fecha> globo-offsite:/root/globo-backups/<fecha>`.
+
 La clave **privada** no está en el servidor. Si alguien entra en él, no puede leer las copias. Guárdala en un gestor de contraseñas: sin ella las copias no sirven.
 
 Para restaurar, por ejemplo en un Postgres vacío:
