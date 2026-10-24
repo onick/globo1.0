@@ -120,7 +120,7 @@ export function HistoryPanel({
 
   function applyPreset(preset: string) {
     const now = new Date();
-    let from = new Date();
+    const from = new Date();
 
     if (preset === "today") {
       from.setHours(0, 0, 0, 0);

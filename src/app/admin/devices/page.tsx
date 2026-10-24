@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Cpu, Plus, Search, Pencil, Trash2, ChevronDown, Download } from "lucide-react";
 import { DeviceForm } from "@/components/admin/device-form";
+import { usePageResetOn } from "@/hooks/usePageResetOn";
 
 interface Device {
   id: string;
@@ -49,7 +50,8 @@ export default function AdminDevicesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [tenantFilter, setTenantFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  // Back to page 1 whenever a filter changes
+  const [page, setPage] = usePageResetOn(JSON.stringify([search, statusFilter, tenantFilter]));
   const [editing, setEditing] = useState<Device | undefined>();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -104,9 +106,6 @@ export default function AdminDevicesPage() {
     return matchesSearch && matchesStatus && matchesTenant;
   });
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, statusFilter, tenantFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

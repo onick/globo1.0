@@ -20,7 +20,6 @@ import {
   Map as MapIcon,
   Route,
   X,
-  Loader2,
   ChevronRight,
   History,
 } from "lucide-react";
@@ -836,7 +835,6 @@ export function TrackingMap() {
     } else {
       map.once("style.load", renderLayers);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeHistory.segments, routeHistory.stops, routeHistory.positions, routeHistory.baseLine, mapMode]);
 
   /* ── Playback animation ────────────────────────────── */
@@ -1343,9 +1341,10 @@ function StatusBadge({
       style={{
         backgroundColor: active ? `${color}15` : undefined,
         color: active ? color : "#64748B",
-        ringColor: active ? color : undefined,
+        // Tailwind's ring-1 reads its color from this variable
+        "--tw-ring-color": active ? color : undefined,
         borderColor: active ? color : undefined,
-      }}
+      } as React.CSSProperties}
     >
       <span
         className="w-2 h-2 rounded-full flex-shrink-0"

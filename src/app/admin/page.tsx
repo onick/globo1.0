@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
   Building2,
-  Cpu,
   Users,
   DollarSign,
   TrendingUp,
@@ -27,6 +26,33 @@ interface TopTenant {
   _count: { devices: number };
 }
 
+async function loadAdminOverview() {
+  const [tenantsRes, plansRes, usersRes] = await Promise.all([
+    fetch("/api/admin/tenants").then((r) => r.json()),
+    fetch("/api/admin/plans").then((r) => r.json()),
+    fetch("/api/admin/users").then((r) => r.json()),
+  ]);
+
+  const tenants = tenantsRes as TopTenant[];
+  const activeTenants = tenants.filter((t) => t.status === "active").length;
+  const totalDevices = tenants.reduce((sum, t) => sum + t._count.devices, 0);
+
+  return {
+    stats: {
+      totalTenants: tenants.length,
+      activeTenants,
+      totalDevices,
+      activeDevices: totalDevices,
+      totalUsers: usersRes.stats?.total ?? 0,
+      monthlyRevenue: plansRes.stats?.monthlyRevenue ?? 0,
+      systemUptime: 99.8,
+    },
+    topTenants: [...tenants]
+      .sort((a: TopTenant, b: TopTenant) => b._count.devices - a._count.devices)
+      .slice(0, 7),
+  };
+}
+
 export default function AdminDashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     totalTenants: 0,
@@ -39,37 +65,18 @@ export default function AdminDashboard() {
   });
   const [topTenants, setTopTenants] = useState<TopTenant[]>([]);
 
-  const fetchData = useCallback(async () => {
-    const [tenantsRes, plansRes, usersRes] = await Promise.all([
-      fetch("/api/admin/tenants").then((r) => r.json()),
-      fetch("/api/admin/plans").then((r) => r.json()),
-      fetch("/api/admin/users").then((r) => r.json()),
-    ]);
-
-    const tenants = tenantsRes as TopTenant[];
-    const activeTenants = tenants.filter((t) => t.status === "active").length;
-    const totalDevices = tenants.reduce((sum, t) => sum + t._count.devices, 0);
-
-    setStats({
-      totalTenants: tenants.length,
-      activeTenants,
-      totalDevices,
-      activeDevices: totalDevices,
-      totalUsers: usersRes.stats?.total ?? 0,
-      monthlyRevenue: plansRes.stats?.monthlyRevenue ?? 0,
-      systemUptime: 99.8,
-    });
-
-    setTopTenants(
-      [...tenants]
-        .sort((a: TopTenant, b: TopTenant) => b._count.devices - a._count.devices)
-        .slice(0, 7)
-    );
-  }, []);
-
+  // Loaded once; state is set from the request's callback, not synchronously in the effect
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    let active = true;
+    loadAdminOverview().then(({ stats, topTenants }) => {
+      if (!active) return;
+      setStats(stats);
+      setTopTenants(topTenants);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const kpis = [
     {

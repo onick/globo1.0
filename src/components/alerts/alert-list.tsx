@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { MapPin } from "lucide-react";
 
@@ -63,27 +63,35 @@ function detail(a: Alert) {
   return a.geofence?.name ?? "Deleted geofence";
 }
 
+async function fetchAlerts(type: string, unreadOnly: boolean): Promise<Alert[] | null> {
+  const query = new URLSearchParams();
+  if (type) query.set("type", type);
+  if (unreadOnly) query.set("unread", "1");
+  const res = await fetch(`/api/alerts?${query}`);
+  return res.ok ? res.json() : null;
+}
+
 export function AlertList() {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  // null until the first load
+  const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [type, setType] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  const load = useCallback(async () => {
-    const query = new URLSearchParams();
-    if (type) query.set("type", type);
-    if (unreadOnly) query.set("unread", "1");
-    const res = await fetch(`/api/alerts?${query}`);
-    if (res.ok) setAlerts(await res.json());
-    setLoaded(true);
-  }, [type, unreadOnly]);
+  // Bumped to reload right away (e.g. after marking alerts read)
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [load]);
+    let active = true;
+    const refresh = () =>
+      fetchAlerts(type, unreadOnly).then((list) => {
+        if (active && list) setAlerts(list);
+      });
+    refresh();
+    const timer = setInterval(refresh, REFRESH_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [type, unreadOnly, version]);
 
   async function markRead(ids?: string[]) {
     const res = await fetch("/api/alerts/read", {
@@ -92,7 +100,7 @@ export function AlertList() {
       body: JSON.stringify(ids ? { ids } : {}),
     });
     if (res.ok) {
-      load();
+      setVersion((v) => v + 1);
       // Let the header bell refresh its count now instead of at its next poll
       window.dispatchEvent(new Event("alerts:read"));
     }
@@ -109,7 +117,7 @@ export function AlertList() {
     return `/map?${query}`;
   }
 
-  const unread = alerts.filter((a) => !a.readAt).length;
+  const unread = (alerts ?? []).filter((a) => !a.readAt).length;
 
   return (
     <div className="space-y-4">
@@ -139,7 +147,7 @@ export function AlertList() {
       </div>
 
       <div className="bg-white border rounded-lg overflow-x-auto">
-        {loaded && alerts.length === 0 ? (
+        {alerts !== null && alerts.length === 0 ? (
           <p className="p-4 text-sm text-zinc-500">No alerts.</p>
         ) : (
           <table className="w-full text-sm">
@@ -151,7 +159,7 @@ export function AlertList() {
               </tr>
             </thead>
             <tbody>
-              {alerts.map((a) => (
+              {(alerts ?? []).map((a) => (
                 <tr key={a.id} className={`border-t ${a.readAt ? "" : "bg-blue-50/60 font-medium"}`}>
                   <td className="px-4 py-2 tabular-nums whitespace-nowrap">{new Date(a.time).toLocaleString()}</td>
                   <td className="px-4 py-2">

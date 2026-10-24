@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { FileText, Search, Download, ChevronDown } from "lucide-react";
+import { usePageResetOn } from "@/hooks/usePageResetOn";
 
 interface AuditLog {
   id: string;
@@ -42,7 +43,8 @@ export default function AuditLogsPage() {
   const [levelFilter, setLevelFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("7");
-  const [page, setPage] = useState(1);
+  // Back to page 1 whenever a filter changes
+  const [page, setPage] = usePageResetOn(JSON.stringify([search, levelFilter, actionFilter, dateFilter]));
 
   const fetchLogs = useCallback(() => {
     fetch("/api/admin/audit-logs")
@@ -80,9 +82,6 @@ export default function AuditLogsPage() {
     return matchesSearch && matchesLevel && matchesAction && matchesDate;
   });
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, levelFilter, actionFilter, dateFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

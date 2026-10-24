@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 type Channel = "email" | "whatsapp";
@@ -56,17 +56,24 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
   const [types, setTypes] = useState<AlertType[]>(ALL_TYPES);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/notification-recipients");
-    if (!res.ok) return;
-    const data = await res.json();
-    setRecipients(data.recipients);
-    setChannels(data.channels);
-  }, []);
+  // Bumped to reload the list after adding a recipient
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
+    let active = true;
+    fetch("/api/notification-recipients")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { recipients: Recipient[]; channels: Record<Channel, boolean> } | null) => {
+        if (!active || !data) return;
+        setRecipients(data.recipients);
+        setChannels(data.channels);
+      });
+    return () => {
+      active = false;
+    };
+  }, [version]);
+
+  useEffect(() => {
     if (isSuperAdmin) {
       fetch("/api/admin/tenants")
         .then((res) => (res.ok ? res.json() : []))
@@ -75,7 +82,7 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
           if (data.length) setTenantId(data[0].id);
         });
     }
-  }, [load, isSuperAdmin]);
+  }, [isSuperAdmin]);
 
   async function add() {
     setError(null);
@@ -90,7 +97,7 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
       return;
     }
     setAddress("");
-    load();
+    setVersion((v) => v + 1);
   }
 
   async function update(r: Recipient, data: Partial<Pick<Recipient, "active" | "alertTypes">>) {

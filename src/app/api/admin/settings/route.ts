@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Session } from "next-auth";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
@@ -47,7 +48,9 @@ const DEFAULT_SETTINGS = {
   twilioConnected: false,
 };
 
-function requireSuperAdmin(session: Awaited<ReturnType<typeof auth>>) {
+// Session, not Awaited<ReturnType<typeof auth>>: auth() is overloaded and that resolves to
+// its middleware form
+function requireSuperAdmin(session: Session | null) {
   if (!session || (session.user as Record<string, unknown>).role !== "super_admin") {
     return false;
   }

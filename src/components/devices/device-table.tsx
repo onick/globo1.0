@@ -9,7 +9,7 @@ import {
   Bike,
 } from "lucide-react";
 
-interface Device {
+export interface Device {
   id: string;
   name: string;
   imei: string;
@@ -20,6 +20,7 @@ interface Device {
   driverPhone: string | null;
   speedLimitKmh: number | null;
   traccarId: number | null;
+  createdAt: string;
 }
 
 const VEHICLE_ICONS: Record<string, typeof Truck> = {
