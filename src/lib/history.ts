@@ -155,3 +155,28 @@ function round(value: number, decimals: number): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
+
+// Traccar positions as route points: in fix-time order, km/h, without (0, 0) fixes (no GPS)
+export function toRoutePoints(
+  positions: {
+    latitude: number;
+    longitude: number;
+    speed: number;
+    course: number;
+    fixTime: string;
+    attributes: Record<string, unknown>;
+  }[]
+): RoutePoint[] {
+  return positions
+    .filter((p) => p.latitude !== 0 || p.longitude !== 0)
+    .sort((a, b) => a.fixTime.localeCompare(b.fixTime))
+    .map((p) => ({
+      latitude: p.latitude,
+      longitude: p.longitude,
+      speedKmh: knotsToKmh(p.speed),
+      course: p.course,
+      time: p.fixTime,
+      snapped: null,
+      ignition: typeof p.attributes.ignition === "boolean" ? p.attributes.ignition : null,
+    }));
+}

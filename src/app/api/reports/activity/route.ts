@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
-import { loadDeviceHistory, snapToRoads } from "@/lib/device-history";
-import {
-  DEFAULT_SPEED_LIMIT_KMH,
-  detectIdle,
-  detectSpeeding,
-  detectTrips,
-} from "@/lib/activity";
+import { loadDeviceHistory, tripsWithRoadDistance } from "@/lib/device-history";
+import { DEFAULT_SPEED_LIMIT_KMH, detectIdle, detectSpeeding } from "@/lib/activity";
 
 // GET /api/reports/activity?deviceId=&from=&to=&speedLimit=80
 // Trips, stops, idling and speeding for one device over a time range.
@@ -24,14 +19,7 @@ export async function GET(request: Request) {
   }
 
   // Trip distance along the roads when OSRM can match it, else between GPS fixes
-  const trips = await Promise.all(
-    detectTrips(points, stops).map(async ({ firstIndex, lastIndex, ...trip }) => {
-      const matched = await snapToRoads(points.slice(firstIndex, lastIndex + 1));
-      return matched
-        ? { ...trip, distanceKm: Math.round(matched.distanceKm * 100) / 100, distanceSource: "roads" as const }
-        : trip;
-    })
-  );
+  const trips = await tripsWithRoadDistance(points, stops);
 
   const idle = detectIdle(points);
   const speeding = detectSpeeding(points, speedLimit);

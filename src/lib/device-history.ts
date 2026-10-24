@@ -4,12 +4,13 @@ import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
 import {
   detectStops,
-  knotsToKmh,
   parseRange,
+  toRoutePoints,
   type RoutePoint,
   type RouteStop,
 } from "@/lib/history";
 import { matchRoute, type MatchedRoute } from "@/lib/map-matching";
+import { detectTrips } from "@/lib/activity";
 
 export interface DeviceHistory {
   device: { id: string; name: string; vehiclePlate: string | null };
@@ -59,18 +60,7 @@ export async function loadDeviceHistory(
     return fail("GPS server unavailable", 502);
   }
 
-  const points: RoutePoint[] = positions
-    .filter((p) => p.latitude !== 0 || p.longitude !== 0)
-    .sort((a, b) => a.fixTime.localeCompare(b.fixTime))
-    .map((p) => ({
-      latitude: p.latitude,
-      longitude: p.longitude,
-      speedKmh: knotsToKmh(p.speed),
-      course: p.course,
-      time: p.fixTime,
-      snapped: null,
-      ignition: typeof p.attributes.ignition === "boolean" ? p.attributes.ignition : null,
-    }));
+  const points = toRoutePoints(positions);
 
   // Stops come from the positions (Traccar's stops report returns nothing for long
   // ranges); Traccar is only used for the address when it reports the same stop.
@@ -106,4 +96,17 @@ export async function snapToRoads(points: RoutePoint[]): Promise<MatchedRoute | 
     console.error("Map matching failed:", err);
     return null;
   }
+}
+
+// Trips between the stops, with each trip's distance along the roads when OSRM can match
+// it. Shared by the activity report and the dashboard so both give the same kilometers.
+export async function tripsWithRoadDistance(points: RoutePoint[], stops: Omit<RouteStop, "address">[]) {
+  return Promise.all(
+    detectTrips(points, stops).map(async ({ firstIndex, lastIndex, ...trip }) => {
+      const matched = await snapToRoads(points.slice(firstIndex, lastIndex + 1));
+      return matched
+        ? { ...trip, distanceKm: Math.round(matched.distanceKm * 100) / 100, distanceSource: "roads" as const }
+        : trip;
+    })
+  );
 }
