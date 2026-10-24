@@ -67,6 +67,9 @@ const MAP_STYLES = {
 
 type MapStyleKey = keyof typeof MAP_STYLES;
 
+// How often the live trails along the roads are reloaded
+const TRAIL_REFRESH_MS = 10_000;
+
 /* ── SVG marker helpers ───────────────────────────────── */
 
 function createArrowSvg(color: string, course: number): string {
@@ -201,9 +204,8 @@ export function TrackingMap() {
   const markersRef = useRef<Map<number, { marker: maplibregl.Marker; el: HTMLDivElement }>>(new Map());
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
 
-  // Trail: accumulate last N positions per device for breadcrumb lines
-  const trailsRef = useRef<Map<number, [number, number][]>>(new Map());
-  const TRAIL_MAX_POINTS = 120; // ~4 min at 2s polling
+  // Traccar ids of the live trails drawn on the map
+  const trailIdsRef = useRef<Set<number>>(new Set());
 
   const { positions, devices, statusCounts } = usePositions();
 
@@ -408,89 +410,73 @@ export function TrackingMap() {
     });
   }, [mapMode, positions, devices]);
 
-  /* ── real-time trails (breadcrumb lines like Uber) ─── */
+  /* ── live trails: each reporting vehicle's last minutes, along the roads ── */
+  // Matched to the streets on the server (/api/positions/trails): joining the live
+  // positions with straight lines would cut through the blocks between reports
+  const [trails, setTrails] = useState<Record<number, [number, number][][]>>({});
+  useEffect(() => {
+    if (mapMode !== "live") return;
+    let active = true;
+    const load = () =>
+      fetch("/api/positions/trails")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { trails: Record<number, [number, number][][]> } | null) => {
+          if (active && data) setTrails(data.trails);
+        })
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, TRAIL_REFRESH_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [mapMode]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
     const deviceMap = new Map(devices.map((d) => [d.traccarId, d]));
-    const activeTrailIds = new Set<number>();
+    const shown = mapMode === "live" ? trails : {};
 
-    positions.forEach((pos) => {
-      const tracked = deviceMap.get(pos.deviceId);
+    Object.entries(shown).forEach(([key, lines]) => {
+      const traccarId = Number(key);
+      const tracked = deviceMap.get(traccarId);
       if (!tracked) return;
-
-      activeTrailIds.add(pos.deviceId);
-
-      // Accumulate trail points
-      let trail = trailsRef.current.get(pos.deviceId);
-      if (!trail) {
-        trail = [];
-        trailsRef.current.set(pos.deviceId, trail);
-      }
-
-      const coord: [number, number] = [pos.longitude, pos.latitude];
-
-      // Only add if position actually changed (avoid duplicate stationary points)
-      const last = trail[trail.length - 1];
-      if (!last || Math.abs(last[0] - coord[0]) > 0.00001 || Math.abs(last[1] - coord[1]) > 0.00001) {
-        trail.push(coord);
-        if (trail.length > TRAIL_MAX_POINTS) {
-          trail.splice(0, trail.length - TRAIL_MAX_POINTS);
-        }
-      }
-
-      // Only render trail if device has moved (at least 2 points)
-      if (trail.length < 2) return;
-
-      const sourceId = `trail-${pos.deviceId}`;
-      const layerId = `trail-line-${pos.deviceId}`;
-      const status = tracked.trackingStatus;
-      const color = STATUS_COLORS[status];
-
-      const geojsonData: GeoJSON.Feature = {
+      const sourceId = `trail-${traccarId}`;
+      const color = STATUS_COLORS[tracked.trackingStatus];
+      const data: GeoJSON.Feature = {
         type: "Feature",
         properties: {},
-        geometry: { type: "LineString", coordinates: trail },
+        geometry: { type: "MultiLineString", coordinates: lines },
       };
-
       try {
-        const existingSource = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
-        if (existingSource) {
-          existingSource.setData(geojsonData);
+        const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
+        if (source) {
+          source.setData(data);
+          map.setPaintProperty(`trail-line-${traccarId}`, "line-color", color);
         } else if (map.isStyleLoaded()) {
-          map.addSource(sourceId, { type: "geojson", data: geojsonData });
+          map.addSource(sourceId, { type: "geojson", data });
           map.addLayer({
-            id: layerId,
+            id: `trail-line-${traccarId}`,
             type: "line",
             source: sourceId,
-            paint: {
-              "line-color": color,
-              "line-width": 3,
-              "line-opacity": 0.6,
-            },
-            layout: {
-              "line-cap": "round",
-              "line-join": "round",
-            },
+            paint: { "line-color": color, "line-width": 3, "line-opacity": 0.6 },
+            layout: { "line-cap": "round", "line-join": "round" },
           });
         }
       } catch { /* style may not be ready */ }
     });
 
-    // Clean up trails for devices no longer in positions
-    trailsRef.current.forEach((_, deviceId) => {
-      if (!activeTrailIds.has(deviceId)) {
-        const sourceId = `trail-${deviceId}`;
-        const layerId = `trail-line-${deviceId}`;
-        try {
-          if (map.getLayer(layerId)) map.removeLayer(layerId);
-          if (map.getSource(sourceId)) map.removeSource(sourceId);
-        } catch { /* ignore */ }
-        trailsRef.current.delete(deviceId);
-      }
+    // Remove the trails of vehicles that stopped reporting (and all of them in history mode)
+    trailIdsRef.current.forEach((traccarId) => {
+      if (shown[traccarId]) return;
+      try {
+        if (map.getLayer(`trail-line-${traccarId}`)) map.removeLayer(`trail-line-${traccarId}`);
+        if (map.getSource(`trail-${traccarId}`)) map.removeSource(`trail-${traccarId}`);
+      } catch { /* ignore */ }
     });
-  }, [positions, devices]);
+    trailIdsRef.current = new Set(Object.keys(shown).map(Number));
+  }, [trails, devices, mapMode]);
 
   /* ── follow mode: auto-center on followed device ───── */
   useEffect(() => {
