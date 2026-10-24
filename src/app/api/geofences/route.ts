@@ -4,7 +4,8 @@ import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { forbiddenResponse, noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { invalidateAlertCache } from "@/lib/alert-processor";
-import { MAX_RADIUS_M, MIN_RADIUS_M, polygonCenter, validatePolygon } from "@/lib/geofences";
+import { parseGeofenceShape } from "@/lib/geofences";
+import { Prisma } from "@prisma/client";
 
 // GET /api/geofences — geofences of the current tenant (all of them for super admins)
 export async function GET() {
@@ -35,7 +36,6 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  const { latitude, longitude, radiusM } = body;
 
   // Super admins have no tenant of their own and must say which one
   const targetTenant = role === "super_admin" ? body.tenantId : tenantId;
@@ -46,30 +46,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
 
-  if (body.shape === "polygon") {
-    const checked = validatePolygon(body.polygon);
-    if ("error" in checked) return NextResponse.json({ error: checked.error }, { status: 400 });
-    const geofence = await db.geofence.create({
-      data: { tenantId: targetTenant as string, name, shape: "polygon", polygon: checked.ring, ...polygonCenter(checked.ring) },
-    });
-    invalidateAlertCache();
-    return NextResponse.json(geofence, { status: 201 });
-  }
-  if (
-    typeof latitude !== "number" || latitude < -90 || latitude > 90 ||
-    typeof longitude !== "number" || longitude < -180 || longitude > 180
-  ) {
-    return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });
-  }
-  if (!Number.isInteger(radiusM) || radiusM < MIN_RADIUS_M || radiusM > MAX_RADIUS_M) {
-    return NextResponse.json(
-      { error: `Radius must be between ${MIN_RADIUS_M} and ${MAX_RADIUS_M} m` },
-      { status: 400 }
-    );
-  }
+  const shape = parseGeofenceShape(body);
+  if ("error" in shape) return NextResponse.json({ error: shape.error }, { status: 400 });
+  const { polygon, ...rest } = shape.data;
 
   const geofence = await db.geofence.create({
-    data: { tenantId: targetTenant as string, name, latitude, longitude, radiusM },
+    data: { tenantId: targetTenant as string, name, ...rest, polygon: polygon ?? Prisma.DbNull },
   });
   invalidateAlertCache();
 

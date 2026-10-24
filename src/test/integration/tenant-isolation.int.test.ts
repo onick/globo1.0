@@ -163,6 +163,10 @@ describe("a client can't change another client's data", () => {
   });
 
   it("geofences", async () => {
+    expect(
+      (await call(geofence.PATCH, { method: "PATCH", params: { id: w.b.geofence.id }, body: { latitude: 0, longitude: 0, radiusM: 100 } })).status
+    ).toBe(403);
+    expect(await db.geofence.findUnique({ where: { id: w.b.geofence.id } })).toMatchObject({ latitude: 18.48 });
     expect((await call(geofence.DELETE, { method: "DELETE", params: { id: w.b.geofence.id } })).status).toBe(403);
     expect(await db.geofence.count({ where: { id: w.b.geofence.id } })).toBe(1);
   });

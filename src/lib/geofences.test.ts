@@ -3,6 +3,7 @@ import {
   distanceToRingM,
   pointInPolygon,
   polygonAreaM2,
+  parseGeofenceShape,
   polygonCenter,
   validatePolygon,
   type LngLat,
@@ -74,6 +75,29 @@ describe("validatePolygon", () => {
   ])("rejects %s", (_name, value, message) => {
     const result = validatePolygon(value);
     expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toMatch(message);
+  });
+});
+
+describe("parseGeofenceShape", () => {
+  it("reads a circle", () => {
+    expect(parseGeofenceShape({ latitude: 18.48, longitude: -69.93, radiusM: 200 })).toEqual({
+      data: { shape: "circle", latitude: 18.48, longitude: -69.93, radiusM: 200, polygon: null },
+    });
+  });
+
+  it("reads a drawn polygon with its center", () => {
+    const result = parseGeofenceShape({ shape: "polygon", polygon: SQUARE });
+    expect(result).toMatchObject({ data: { shape: "polygon", polygon: SQUARE, latitude: 18.481, longitude: -69.93 } });
+  });
+
+  it.each([
+    [{ latitude: 95, longitude: 0, radiusM: 200 }, /coordinates/],
+    [{ latitude: 18, longitude: -69, radiusM: 10 }, /Radius/],
+    [{ latitude: 18, longitude: -69, radiusM: 200.5 }, /Radius/],
+    [{ shape: "polygon", polygon: SQUARE.slice(0, 2) }, /3 to 100/],
+  ])("rejects %o", (body, message) => {
+    const result = parseGeofenceShape(body);
     expect((result as { error: string }).error).toMatch(message);
   });
 });

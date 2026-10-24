@@ -129,3 +129,32 @@ export function validatePolygon(value: unknown): { ring: LngLat[] } | { error: s
   if (polygonCenter(ring).radiusM * 2 > MAX_POLYGON_SPAN_M) return { error: "The polygon is too large (100 km at most)" };
   return { ring };
 }
+
+export interface GeofenceShapeData {
+  shape: "circle" | "polygon";
+  latitude: number;
+  longitude: number;
+  radiusM: number;
+  polygon: LngLat[] | null;
+}
+
+// The shape fields of a create or edit request, checked: a circle (latitude, longitude,
+// radiusM) or a drawn polygon ({ shape: "polygon", polygon })
+export function parseGeofenceShape(body: Record<string, unknown>): { data: GeofenceShapeData } | { error: string } {
+  if (body.shape === "polygon") {
+    const checked = validatePolygon(body.polygon);
+    if ("error" in checked) return checked;
+    return { data: { shape: "polygon", polygon: checked.ring, ...polygonCenter(checked.ring) } };
+  }
+  const { latitude, longitude, radiusM } = body;
+  if (
+    typeof latitude !== "number" || latitude < -90 || latitude > 90 ||
+    typeof longitude !== "number" || longitude < -180 || longitude > 180
+  ) {
+    return { error: "Invalid coordinates" };
+  }
+  if (typeof radiusM !== "number" || !Number.isInteger(radiusM) || radiusM < MIN_RADIUS_M || radiusM > MAX_RADIUS_M) {
+    return { error: `Radius must be between ${MIN_RADIUS_M} and ${MAX_RADIUS_M} m` };
+  }
+  return { data: { shape: "circle", latitude, longitude, radiusM, polygon: null } };
+}
