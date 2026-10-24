@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
+import { invalidateAlertCache } from "@/lib/alert-processor";
 
 // DELETE /api/devices/:id
 export async function DELETE(
@@ -61,6 +62,16 @@ export async function PATCH(
   }
 
   const data = await request.json();
+
+  // null goes back to the default limit
+  const limit = data.speedLimitKmh;
+  if (limit !== undefined && limit !== null && (!Number.isInteger(limit) || limit < 10 || limit > 200)) {
+    return NextResponse.json(
+      { error: "speedLimitKmh must be a whole number between 10 and 200, or null" },
+      { status: 400 }
+    );
+  }
+
   const updated = await db.device.update({
     where: { id },
     data: {
@@ -68,8 +79,10 @@ export async function PATCH(
       vehiclePlate: data.vehiclePlate,
       vehicleType: data.vehicleType,
       status: data.status,
+      speedLimitKmh: limit,
     },
   });
+  if (limit !== undefined) invalidateAlertCache();
 
   return NextResponse.json(updated);
 }

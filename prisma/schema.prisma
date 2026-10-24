@@ -26,6 +26,12 @@ enum DeviceStatus {
   disabled
 }
 
+enum AlertType {
+  geofence_enter
+  geofence_exit
+  overspeed
+}
+
 enum SubscriptionStatus {
   active
   past_due
@@ -45,6 +51,8 @@ model Tenant {
   users         User[]
   devices       Device[]
   subscriptions Subscription[]
+  geofences     Geofence[]
+  alerts        Alert[]
 
   @@map("tenants")
 }
@@ -66,31 +74,77 @@ model User {
 }
 
 model Device {
-  id           String       @id @default(cuid())
-  tenantId     String       @map("tenant_id")
-  traccarId    Int?         @unique @map("traccar_id")
-  name         String
-  imei         String       @unique
-  status       DeviceStatus @default(active)
-  vehiclePlate String?      @map("vehicle_plate")
-  vehicleType  String?      @map("vehicle_type")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  id            String       @id @default(cuid())
+  tenantId      String       @map("tenant_id")
+  traccarId     Int?         @unique @map("traccar_id")
+  name          String
+  imei          String       @unique
+  status        DeviceStatus @default(active)
+  vehiclePlate  String?      @map("vehicle_plate")
+  vehicleType   String?      @map("vehicle_type")
+  // Overspeed alerts above this; null uses the default (80 km/h)
+  speedLimitKmh Int?         @map("speed_limit_kmh")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alerts Alert[]
 
   @@index([tenantId])
   @@map("devices")
 }
 
+// Circular geofence; applies to every device of its tenant
+model Geofence {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  latitude  Float
+  longitude Float
+  radiusM   Int      @map("radius_m")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alerts Alert[]
+
+  @@index([tenantId])
+  @@map("geofences")
+}
+
+// Raised by the alert engine as positions arrive from Traccar
+model Alert {
+  id         String    @id @default(cuid())
+  tenantId   String    @map("tenant_id")
+  deviceId   String    @map("device_id")
+  type       AlertType
+  geofenceId String?   @map("geofence_id")
+  // Fix time of the position that raised it
+  time       DateTime
+  latitude   Float
+  longitude  Float
+  speedKmh   Float     @map("speed_kmh")
+  limitKmh   Int?      @map("limit_kmh")
+  readAt     DateTime? @map("read_at")
+  // device + type + geofence + time: the same position never raises the same alert twice
+  dedupKey   String    @unique @map("dedup_key")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  device   Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  geofence Geofence? @relation(fields: [geofenceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, time])
+  @@map("alerts")
+}
+
 model Plan {
-  id         String  @id @default(cuid())
-  name       String  @unique
-  maxDevices Int     @map("max_devices")
-  price      Int     // cents
-  interval   String  @default("monthly")
-  features   Json    @default("[]")
-  active     Boolean @default(true)
+  id         String   @id @default(cuid())
+  name       String   @unique
+  maxDevices Int      @map("max_devices")
+  price      Int // cents
+  interval   String   @default("monthly")
+  features   Json     @default("[]")
+  active     Boolean  @default(true)
   createdAt  DateTime @default(now()) @map("created_at")
 
   subscriptions Subscription[]

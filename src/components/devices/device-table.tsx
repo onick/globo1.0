@@ -11,21 +11,69 @@ interface Device {
   status: string;
   vehiclePlate: string | null;
   vehicleType: string | null;
+  speedLimitKmh: number | null;
 }
 
+const DEFAULT_LIMIT_KMH = 80;
+
+// Speed limit for overspeed alerts; saved when the field loses focus. Empty = default.
+function SpeedLimitInput({ device }: { device: Device }) {
+  const [value, setValue] = useState(device.speedLimitKmh?.toString() ?? "");
+  const [savedLimit, setSavedLimit] = useState(device.speedLimitKmh);
+  const [status, setStatus] = useState<"idle" | "saved" | "error">("idle");
+
+  async function save() {
+    const limit = value.trim() === "" ? null : Number(value);
+    if (limit === savedLimit) return;
+    const res = await fetch(`/api/devices/${device.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ speedLimitKmh: limit }),
+    });
+    if (res.ok) {
+      setSavedLimit(limit);
+      setStatus("saved");
+    } else {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="number"
+        min={10}
+        max={200}
+        value={value}
+        placeholder={String(DEFAULT_LIMIT_KMH)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setStatus("idle");
+        }}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        aria-label={`Speed limit for ${device.name} (km/h)`}
+        className="w-20 border rounded-md px-2 py-1 text-sm"
+      />
+      {status === "saved" && <span className="text-xs text-green-600">Saved</span>}
+      {status === "error" && <span className="text-xs text-red-600">10–200</span>}
+    </div>
+  );
+}
+
+// The page owns the list: a copy in local state would stay empty when the devices
+// arrive after the first render
 export function DeviceTable({
-  devices: initialDevices,
+  devices,
+  onDeleted,
 }: {
   devices: Device[];
+  onDeleted: () => void;
 }) {
-  const [devices, setDevices] = useState(initialDevices);
-
   async function handleDelete(id: string) {
     if (!confirm("Delete this device?")) return;
     const res = await fetch(`/api/devices/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setDevices(devices.filter((d) => d.id !== id));
-    }
+    if (res.ok) onDeleted();
   }
 
   return (
@@ -38,6 +86,7 @@ export function DeviceTable({
             <th className="text-left p-3 font-medium">Plate</th>
             <th className="text-left p-3 font-medium">Type</th>
             <th className="text-left p-3 font-medium">Status</th>
+            <th className="text-left p-3 font-medium">Speed limit (km/h)</th>
             <th className="p-3"></th>
           </tr>
         </thead>
@@ -62,6 +111,9 @@ export function DeviceTable({
                 </span>
               </td>
               <td className="p-3">
+                <SpeedLimitInput device={device} />
+              </td>
+              <td className="p-3">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -74,7 +126,7 @@ export function DeviceTable({
           ))}
           {devices.length === 0 && (
             <tr>
-              <td colSpan={6} className="p-8 text-center text-zinc-400">
+              <td colSpan={7} className="p-8 text-center text-zinc-400">
                 No devices yet. Add your first device.
               </td>
             </tr>

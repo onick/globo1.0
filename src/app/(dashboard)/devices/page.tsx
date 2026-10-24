@@ -38,7 +38,7 @@ export default function DevicesPage() {
         />
       )}
 
-      <DeviceTable devices={devices} />
+      <DeviceTable devices={devices} onDeleted={loadDevices} />
     </div>
   );
 }

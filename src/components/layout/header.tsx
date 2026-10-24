@@ -1,5 +1,6 @@
 import { auth, signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { AlertBell } from "@/components/alerts/alert-bell";
 
 export async function Header() {
   const session = await auth();
@@ -11,6 +12,7 @@ export async function Header() {
           "Super Admin"}
       </div>
       <div className="flex items-center gap-4">
+        <AlertBell />
         <span className="text-sm">{session?.user?.email}</span>
         <form
           action={async () => {
