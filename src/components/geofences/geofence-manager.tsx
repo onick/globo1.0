@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Circle, Crosshair, Hexagon, Loader2, MousePointerClick, PenLine, Trash2, Undo2 } from "lucide-react";
+import { Circle, Crosshair, Hexagon, Loader2, MousePointerClick, PenLine, Pencil, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,13 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     clickRef.current = { canManage, mode };
   }, [canManage, mode]);
   const [mapReady, setMapReady] = useState(false);
+  // Saved geofence being edited (its points are in the draft), null when creating one
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // A crosshair to place points precisely, instead of the map's hand
+  useEffect(() => {
+    const canvas = mapRef.current?.getCanvas();
+    if (canvas) canvas.style.cursor = canManage ? "crosshair" : "";
+  }, [canManage, mapReady]);
 
   const [geofences, setGeofences] = useState<Geofence[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -148,8 +155,50 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       map.on("click", (e) => {
         const { canManage, mode } = clickRef.current;
         if (!canManage) return;
+        // A click on a corner or the center selects it to drag; it doesn't add a point
+        if (map.queryRenderedFeatures(e.point, { layers: ["draft-corners"] }).length) return;
         if (mode === "polygon") setCorners((list) => [...list, [e.lngLat.lng, e.lngLat.lat]]);
         else setCenter({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
+      });
+
+      // Corners (and the circle's center) can be dragged to adjust the shape
+      let dragging: { kind: "center" } | { kind: "corner"; index: number } | null = null;
+      const canvas = map.getCanvas();
+      const startDrag = (e: maplibregl.MapLayerMouseEvent | maplibregl.MapLayerTouchEvent) => {
+        const feature = e.features?.[0];
+        if (!feature || !clickRef.current.canManage) return;
+        e.preventDefault();
+        dragging =
+          feature.properties.kind === "center" ? { kind: "center" } : { kind: "corner", index: Number(feature.properties.index) };
+        canvas.style.cursor = "grabbing";
+        map.dragPan.disable();
+      };
+      const drag = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+        if (!dragging) return;
+        const point: LngLat = [e.lngLat.lng, e.lngLat.lat];
+        if (dragging.kind === "center") setCenter({ latitude: point[1], longitude: point[0] });
+        else {
+          const index = dragging.index;
+          setCorners((list) => list.map((c, i) => (i === index ? point : c)));
+        }
+      };
+      const endDrag = () => {
+        if (!dragging) return;
+        dragging = null;
+        canvas.style.cursor = "move";
+        map.dragPan.enable();
+      };
+      map.on("mousedown", "draft-corners", startDrag);
+      map.on("touchstart", "draft-corners", startDrag);
+      map.on("mousemove", drag);
+      map.on("touchmove", drag);
+      map.on("mouseup", endDrag);
+      map.on("touchend", endDrag);
+      map.on("mouseenter", "draft-corners", () => {
+        if (clickRef.current.canManage && !dragging) canvas.style.cursor = "move";
+      });
+      map.on("mouseleave", "draft-corners", () => {
+        if (!dragging) canvas.style.cursor = clickRef.current.canManage ? "crosshair" : "";
       });
       setMapReady(true);
     });
@@ -164,16 +213,25 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     const source = mapRef.current?.getSource("geofences") as GeoJSONSource | undefined;
     source?.setData({
       type: "FeatureCollection",
-      features: geofences.map((g) => polygonFeature(ringOf(g), { name: g.name })),
+      // The one being edited is drawn as the draft instead
+      features: geofences.filter((g) => g.id !== editingId).map((g) => polygonFeature(ringOf(g), { name: g.name })),
     });
-  }, [geofences, mapReady]);
+  }, [geofences, editingId, mapReady]);
 
   useEffect(() => {
     const source = mapRef.current?.getSource("draft") as GeoJSONSource | undefined;
+    const handle = (coordinates: LngLat, properties: Record<string, unknown>) => ({
+      type: "Feature" as const,
+      properties,
+      geometry: { type: "Point" as const, coordinates },
+    });
     const features =
       mode === "circle"
         ? center
-          ? [circleFeature(center.latitude, center.longitude, radiusM)]
+          ? [
+              circleFeature(center.latitude, center.longitude, radiusM),
+              handle([center.longitude, center.latitude], { kind: "center" }),
+            ]
           : []
         : [
             ...(corners.length >= MIN_POLYGON_POINTS
@@ -181,7 +239,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
               : corners.length === 2
                 ? [{ type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: corners } }]
                 : []),
-            ...corners.map((c) => ({ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates: c } })),
+            ...corners.map((c, index) => handle(c, { kind: "corner", index })),
           ];
     source?.setData({ type: "FeatureCollection", features });
   }, [mode, center, corners, radiusM, mapReady]);
@@ -200,6 +258,29 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     setCenter(null);
     setCorners([]);
     setError(null);
+    if (editingId) {
+      setEditingId(null);
+      setName("");
+    }
+  }
+
+  // Puts a saved geofence in the draft, so its corners or center can be dragged
+  function startEditing(g: Geofence) {
+    setEditingId(g.id);
+    setName(g.name);
+    setError(null);
+    setTenantId(g.tenantId);
+    if (g.shape === "polygon" && g.polygon) {
+      setMode("polygon");
+      setCorners(g.polygon);
+      setCenter(null);
+    } else {
+      setMode("circle");
+      setCenter({ latitude: g.latitude, longitude: g.longitude });
+      setRadiusM(g.radiusM);
+      setCorners([]);
+    }
+    focus(g);
   }
 
   function focus(g: Geofence) {
@@ -218,8 +299,8 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       mode === "polygon"
         ? { shape: "polygon", polygon: corners }
         : { latitude: center!.latitude, longitude: center!.longitude, radiusM };
-    const res = await fetch("/api/geofences", {
-      method: "POST",
+    const res = await fetch(editingId ? `/api/geofences/${editingId}` : "/api/geofences", {
+      method: editingId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, ...shape, ...(isSuperAdmin ? { tenantId } : {}) }),
     });
@@ -229,7 +310,8 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       setError(data.error || "Could not save the geofence");
       return;
     }
-    toast.success(`Geofence "${name.trim()}" saved`);
+    toast.success(`Geofence "${name.trim()}" ${editingId ? "updated" : "saved"}`);
+    setEditingId(null);
     clearDraft();
     setName("");
     setVersion((v) => v + 1);
@@ -257,7 +339,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           <PenLine className="size-4 text-orange-500" />
           {corners.length} corner{corners.length === 1 ? "" : "s"}
           <span className="text-muted-foreground">
-            · {corners.length < MIN_POLYGON_POINTS ? `add at least ${MIN_POLYGON_POINTS - corners.length} more` : "keep clicking or save"}
+            · {corners.length < MIN_POLYGON_POINTS ? `add at least ${MIN_POLYGON_POINTS - corners.length} more` : "drag a corner to move it"}
           </span>
         </>
       )
@@ -267,7 +349,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         <span className="tabular-nums">
           {center.latitude.toFixed(5)}, {center.longitude.toFixed(5)}
         </span>
-        <span className="text-muted-foreground">· click again to move it</span>
+        <span className="text-muted-foreground">· drag the center to move it</span>
       </>
     ) : (
       <>
@@ -294,9 +376,13 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           {canManage && (
             <div className="bg-card border rounded-xl p-4 space-y-4">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">New geofence</h2>
+                <h2 className="text-sm font-semibold text-foreground">{editingId ? "Edit geofence" : "New geofence"}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {mode === "circle" ? "A circle around the point you click on the map." : "Any shape: click its corners on the map."}
+                  {editingId
+                    ? "Drag its corners or center on the map, then save."
+                    : mode === "circle"
+                      ? "A circle around the point you click on the map."
+                      : "Any shape: click its corners on the map."}
                 </p>
               </div>
               <Tabs value={mode} onValueChange={(v) => changeMode(v as Mode)}>
@@ -313,7 +399,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
               </Tabs>
               {isSuperAdmin && (
                 <FormField label="Client">
-                  <Select value={tenantId} onValueChange={setTenantId}>
+                  <Select value={tenantId} onValueChange={setTenantId} disabled={!!editingId}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Choose a client" />
                     </SelectTrigger>
@@ -359,14 +445,14 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
               )}
               {error && <p className="text-sm text-destructive">{error}</p>}
               <div className="flex gap-2">
-                {(center || corners.length > 0) && (
+                {(editingId || center || corners.length > 0) && (
                   <Button variant="outline" onClick={clearDraft}>
-                    {mode === "polygon" ? "Start over" : "Cancel"}
+                    {editingId ? "Cancel" : mode === "polygon" ? "Start over" : "Cancel"}
                   </Button>
                 )}
                 <Button onClick={save} disabled={!ready || !name.trim() || saving} className="flex-1">
                   {saving && <Loader2 className="animate-spin" />}
-                  {ready ? "Save geofence" : mode === "polygon" ? "Draw it on the map first" : "Place it on the map first"}
+                  {ready ? (editingId ? "Save changes" : "Save geofence") : mode === "polygon" ? "Draw it on the map first" : "Place it on the map first"}
                 </Button>
               </div>
             </div>
@@ -385,7 +471,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
             ) : (
               <ul className="px-2 pb-2">
                 {geofences.map((g) => (
-                  <li key={g.id} className="group flex items-center gap-1 rounded-lg hover:bg-accent">
+                  <li key={g.id} className={`group flex items-center gap-1 rounded-lg hover:bg-accent ${g.id === editingId ? "bg-orange-50" : ""}`}>
                     <button onClick={() => focus(g)} className="flex-1 min-w-0 text-left px-2 py-2">
                       <div className="text-sm font-medium text-foreground truncate">{g.name}</div>
                       <div className="text-xs text-muted-foreground">
@@ -395,6 +481,18 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                         {isSuperAdmin ? ` · ${g.tenant.name}` : ""}
                       </div>
                     </button>
+                    {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Edit ${g.name}`}
+                        title="Edit: move its corners or center"
+                        className="text-muted-foreground hover:text-primary"
+                        onClick={() => startEditing(g)}
+                      >
+                        <Pencil />
+                      </Button>
+                    )}
                     {canManage && (
                       <ConfirmDialog
                         title={`Delete "${g.name}"?`}

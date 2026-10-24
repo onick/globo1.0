@@ -50,6 +50,11 @@ const CHANGES: [string, Action, () => Promise<{ status: number }>][] = [
     "geofences:manage",
     () => call(geofences.POST, { method: "POST", body: { name: "New", latitude: 18.5, longitude: -69.9, radiusM: 100 } }),
   ],
+  [
+    "move a geofence",
+    "geofences:manage",
+    () => call(geofence.PATCH, { method: "PATCH", params: { id: w.a.geofence.id }, body: { latitude: 18.49, longitude: -69.92, radiusM: 300 } }),
+  ],
   ["delete a geofence", "geofences:manage", () => call(geofence.DELETE, { method: "DELETE", params: { id: w.a.geofence.id } })],
   ["mark alerts read", "alerts:acknowledge", () => call(alertsRead.POST, { method: "POST", body: {} })],
   [
@@ -161,6 +166,16 @@ describe("drawn geofences", () => {
     expect(body.radiusM).toBeGreaterThan(150);
     const list = (await call(geofences.GET)).body as { name: string; shape: string }[];
     expect(list.find((g) => g.name === "Yard")).toMatchObject({ shape: "polygon" });
+  });
+
+  it("can be reshaped: a circle turned into a drawn area and back", async () => {
+    signInAs(w.a.admin);
+    const params = { id: w.a.geofence.id };
+    const drawn = await call(geofence.PATCH, { method: "PATCH", params, body: { name: "Yard", shape: "polygon", polygon: square } });
+    expect(drawn.status).toBe(200);
+    expect(drawn.body).toMatchObject({ name: "Yard", shape: "polygon", polygon: square });
+    const circle = await call(geofence.PATCH, { method: "PATCH", params, body: { latitude: 18.48, longitude: -69.93, radiusM: 120 } });
+    expect(circle.body).toMatchObject({ name: "Yard", shape: "circle", radiusM: 120, polygon: null });
   });
 
   it("reject shapes that can't be watched", async () => {
