@@ -1,16 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { RouteMap } from "@/components/history/route-map";
+import { DeviceRangeFilters, useDeviceRange } from "@/components/filters/device-range-filters";
 import type { RoutePoint, RouteStop, RouteSummary } from "@/lib/history";
-
-interface DeviceOption {
-  id: string;
-  name: string;
-  vehiclePlate: string | null;
-  traccarId: number | null;
-}
 
 interface HistoryResponse {
   points: RoutePoint[];
@@ -22,35 +17,14 @@ interface HistoryResponse {
 const PLAYBACK_SPEEDS = [1, 2, 4, 8];
 const BASE_STEP_MS = 400;
 
-// "YYYY-MM-DDTHH:mm" in local time, the format datetime-local inputs use
-function toLocalInput(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
-}
-
-function startOfDay(date: Date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function presetRange(preset: "today" | "yesterday" | "week") {
-  const now = new Date();
-  if (preset === "today") return { from: startOfDay(now), to: now };
-  if (preset === "yesterday") {
-    const to = startOfDay(now);
-    return { from: new Date(to.getTime() - 24 * 3600 * 1000), to };
-  }
-  return { from: new Date(now.getTime() - 7 * 24 * 3600 * 1000), to: now };
-}
-
 export function RouteHistory() {
-  const [devices, setDevices] = useState<DeviceOption[]>([]);
-  const [deviceId, setDeviceId] = useState("");
-  const [from, setFrom] = useState(() => toLocalInput(presetRange("today").from));
-  const [to, setTo] = useState(() => toLocalInput(presetRange("today").to));
+  // ?deviceId=&from=&to= (e.g. from a report row) opens that period directly
+  const searchParams = useSearchParams();
+  const range = useDeviceRange({
+    deviceId: searchParams.get("deviceId"),
+    from: searchParams.get("from"),
+    to: searchParams.get("to"),
+  });
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,16 +34,6 @@ export function RouteHistory() {
   const [speed, setSpeed] = useState(1);
   const [snapToRoads, setSnapToRoads] = useState(true);
   const [showGpsPoints, setShowGpsPoints] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/devices")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: DeviceOption[]) => {
-        const linked = data.filter((d) => d.traccarId);
-        setDevices(linked);
-        if (linked.length) setDeviceId(linked[0].id);
-      });
-  }, []);
 
   const points = history?.points ?? [];
   const current = points[index];
@@ -89,26 +53,15 @@ export function RouteHistory() {
     return () => clearInterval(timer);
   }, [playing, speed, points.length]);
 
-  function applyPreset(preset: "today" | "yesterday" | "week") {
-    const range = presetRange(preset);
-    setFrom(toLocalInput(range.from));
-    setTo(toLocalInput(range.to));
-  }
-
   async function loadHistory() {
-    if (!deviceId) return;
+    if (!range.deviceId) return;
     setLoading(true);
     setError(null);
     setPlaying(false);
     setIndex(0);
 
-    const query = new URLSearchParams({
-      deviceId,
-      from: new Date(from).toISOString(),
-      to: new Date(to).toISOString(),
-    });
     try {
-      const res = await fetch(`/api/history?${query}`);
+      const res = await fetch(`/api/history?${range.query()}`);
       const data = await res.json();
       if (!res.ok) {
         setHistory(null);
@@ -124,6 +77,15 @@ export function RouteHistory() {
     }
   }
 
+  // Opened from a link with a device and period: load it once the devices are known
+  const autoLoaded = useRef(false);
+  useEffect(() => {
+    if (autoLoaded.current || !range.devicesLoaded || !searchParams.get("deviceId")) return;
+    autoLoaded.current = true;
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.devicesLoaded]);
+
   function togglePlay() {
     if (!points.length) return;
     if (index >= points.length - 1) setIndex(0);
@@ -132,66 +94,12 @@ export function RouteHistory() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] gap-4">
-      <div className="flex flex-wrap items-end gap-3 bg-white border rounded-lg p-4">
-        <label className="flex flex-col gap-1 text-sm">
-          Device
-          <select
-            value={deviceId}
-            onChange={(e) => setDeviceId(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm min-w-48"
-          >
-            {devices.length === 0 && <option value="">No linked devices</option>}
-            {devices.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-                {d.vehiclePlate ? ` · ${d.vehiclePlate}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          From
-          <input
-            type="datetime-local"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          To
-          <input
-            type="datetime-local"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
-          />
-        </label>
-        <div className="flex gap-1">
-          {(
-            [
-              ["today", "Today"],
-              ["yesterday", "Yesterday"],
-              ["week", "Last 7 days"],
-            ] as const
-          ).map(([preset, label]) => (
-            <button
-              key={preset}
-              onClick={() => applyPreset(preset)}
-              className="px-3 py-2 border rounded-md text-sm hover:bg-zinc-100"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={loadHistory}
-          disabled={!deviceId || loading}
-          className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800 disabled:opacity-50"
-        >
-          {loading ? "Loading..." : "Show route"}
-        </button>
-      </div>
+      <DeviceRangeFilters
+        range={range}
+        onSubmit={loadHistory}
+        loading={loading}
+        submitLabel="Show route"
+      />
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-4 py-2">

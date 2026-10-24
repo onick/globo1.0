@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Map, Cpu, Settings, CreditCard, Building2, History } from "lucide-react";
+import { Map, Cpu, Settings, CreditCard, Building2, History, ClipboardList } from "lucide-react";
 
 const navigation = [
   { name: "Map", href: "/map", icon: Map },
   { name: "History", href: "/history", icon: History },
+  { name: "Reports", href: "/reports", icon: ClipboardList },
   { name: "Devices", href: "/devices", icon: Cpu },
   { name: "Settings", href: "/settings", icon: Settings },
 ];

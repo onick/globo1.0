@@ -8,6 +8,8 @@ export interface RoutePoint {
   time: string;
   // Position on the road network after map matching; null when not matched
   snapped: [number, number] | null;
+  // Engine state when the device reports it; null when it doesn't
+  ignition: boolean | null;
 }
 
 export interface RouteStop {
@@ -95,14 +97,16 @@ export function summarizeRoute(
 
 // Stops from the positions themselves: runs of fixes at or below STOP_MAX_SPEED_KMH
 // lasting at least STOP_MIN_DURATION_MIN. Works the same for any date range.
+// Like every period in the reports, a stop goes from its first to its last observed fix:
+// the vehicle left somewhere before the next report, so durations can be short by up to
+// one reporting interval. The next trip starts on the stop's last fix.
 export function detectStops(points: RoutePoint[]): Omit<RouteStop, "address">[] {
   const stops: Omit<RouteStop, "address">[] = [];
   let start = -1;
 
-  // lastStopped: last fix of the run; end: fix that ends it (first moving fix, or the last one)
-  const close = (lastStopped: number, end: number) => {
+  const close = (lastStopped: number) => {
     const first = points[start];
-    const last = points[end];
+    const last = points[lastStopped];
     const minutes = (new Date(last.time).getTime() - new Date(first.time).getTime()) / 60000;
     if (minutes >= STOP_MIN_DURATION_MIN) {
       const run = points.slice(start, lastStopped + 1);
@@ -120,12 +124,11 @@ export function detectStops(points: RoutePoint[]): Omit<RouteStop, "address">[] 
     const stopped = point.speedKmh <= STOP_MAX_SPEED_KMH;
     if (stopped && start === -1) start = i;
     if (!stopped && start !== -1) {
-      // The stop lasts until the vehicle starts moving again
-      close(i - 1, i);
+      close(i - 1);
       start = -1;
     }
   });
-  if (start !== -1) close(points.length - 1, points.length - 1);
+  if (start !== -1) close(points.length - 1);
 
   return stops;
 }
