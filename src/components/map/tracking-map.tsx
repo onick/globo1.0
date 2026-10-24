@@ -28,6 +28,7 @@ import { SensorOverlay } from "./sensor-overlay";
 import { HistoryPanel } from "./history-panel";
 import { PlaybackControls } from "./playback-controls";
 import { useRouteHistory, type StopEvent, type RouteSegment } from "@/hooks/useRouteHistory";
+import { advanceTime, positionAt, stepTo } from "@/lib/playback";
 
 /* ── constants ────────────────────────────────────────── */
 
@@ -198,14 +199,15 @@ export function TrackingMap() {
   const [historyDeviceId, setHistoryDeviceId] = useState<string | null>(null);
   const routeHistory = useRouteHistory();
 
-  // Playback state
+  // Playback state: a clock in the trip's own time (ms), null before it starts
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [playbackIndex, setPlaybackIndex] = useState(0);
+  const [playbackTime, setPlaybackTime] = useState<number | null>(null);
+  // The animation reads and moves the clock every frame; the state above follows it ~10 times a second
+  const playbackTimeRef = useRef<number | null>(null);
   const playbackMarkerRef = useRef<maplibregl.Marker | null>(null);
   const historyMarkersRef = useRef<maplibregl.Marker[]>([]);
   const animFrameRef = useRef<number | null>(null);
-  const lastTickRef = useRef<number>(0);
 
   /* ── detail device (live-updated from devices array) ── */
   const detailDevice = useMemo(() => {
@@ -372,6 +374,14 @@ export function TrackingMap() {
       }
     });
   }, [positions, devices]);
+
+  // History shows only the replayed vehicle: hundreds of live markers would bury its route
+  useEffect(() => {
+    const hidden = mapMode === "history";
+    markersRef.current.forEach(({ el }) => {
+      el.style.display = hidden ? "none" : "";
+    });
+  }, [mapMode, positions, devices]);
 
   /* ── real-time trails (breadcrumb lines like Uber) ─── */
   useEffect(() => {
@@ -635,7 +645,8 @@ export function TrackingMap() {
       animFrameRef.current = null;
     }
     setIsPlaying(false);
-    setPlaybackIndex(0);
+    setPlaybackTime(null);
+    playbackTimeRef.current = null;
   }, []);
 
   /* ── Switch mode cleanup ───────────────────────────── */
@@ -837,62 +848,71 @@ export function TrackingMap() {
     }
   }, [routeHistory.segments, routeHistory.stops, routeHistory.positions, routeHistory.baseLine, mapMode]);
 
-  /* ── Playback animation ────────────────────────────── */
+  /* ── Playback ──────────────────────────────────────── */
+  const track = routeHistory.track;
+  const trackStart = track.length ? track[0].t : 0;
+  const trackEnd = track.length ? track[track.length - 1].t : 0;
+  const fixTimes = useMemo(() => routeHistory.positions.map((p) => new Date(p.fixTime).getTime()), [routeHistory.positions]);
+
+  // Puts the playback arrow where the vehicle was at trip time t
+  const placePlaybackMarker = useCallback((t: number) => {
+    const map = mapRef.current;
+    const pos = positionAt(track, t);
+    if (!map || !pos) return null;
+    if (!playbackMarkerRef.current) {
+      const el = document.createElement("div");
+      el.style.cssText = "cursor:pointer;line-height:0;";
+      playbackMarkerRef.current = new maplibregl.Marker({ element: el, rotationAlignment: "map" })
+        .setLngLat([pos.lng, pos.lat])
+        .addTo(map);
+    }
+    playbackMarkerRef.current.setLngLat([pos.lng, pos.lat]);
+    playbackMarkerRef.current.getElement().innerHTML = createArrowSvg("#2563EB", pos.course);
+    return pos;
+  }, [track]);
+
+  // Moves the clock (and the arrow) to trip time t, e.g. from the bar or the step buttons
+  const seekTo = useCallback((t: number) => {
+    const clamped = Math.min(trackEnd, Math.max(trackStart, t));
+    playbackTimeRef.current = clamped;
+    setPlaybackTime(clamped);
+    const pos = placePlaybackMarker(clamped);
+    if (pos) mapRef.current?.easeTo({ center: [pos.lng, pos.lat], duration: 300 });
+  }, [trackStart, trackEnd, placePlaybackMarker]);
+
   useEffect(() => {
-    if (!isPlaying || mapMode !== "history" || routeHistory.positions.length === 0) {
+    if (!isPlaying || mapMode !== "history" || track.length < 2) {
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
         animFrameRef.current = null;
       }
       return;
     }
-
     const map = mapRef.current;
     if (!map) return;
 
-    // Create playback marker if needed
-    if (!playbackMarkerRef.current) {
-      const el = document.createElement("div");
-      el.innerHTML = createArrowSvg("#2563EB", 0);
-      el.style.cssText = "cursor:pointer;line-height:0;";
-      playbackMarkerRef.current = new maplibregl.Marker({ element: el, rotationAlignment: "map" })
-        .setLngLat([routeHistory.positions[0].longitude, routeHistory.positions[0].latitude])
-        .addTo(map);
-    }
-
-    lastTickRef.current = performance.now();
-
+    let lastFrame = performance.now();
+    let lastUiUpdate = 0;
     const tick = (now: number) => {
-      const elapsed = now - lastTickRef.current;
-      lastTickRef.current = now;
+      const t = Math.min(trackEnd, advanceTime(playbackTimeRef.current ?? trackStart, now - lastFrame, playbackSpeed));
+      lastFrame = now;
+      playbackTimeRef.current = t;
 
-      // Advance based on speed (base: 1 position per 100ms at 1x)
-      const advance = Math.max(1, Math.floor((elapsed / 100) * playbackSpeed));
+      // Follow the vehicle
+      const pos = placePlaybackMarker(t);
+      if (pos) map.setCenter([pos.lng, pos.lat]);
 
-      setPlaybackIndex((prev) => {
-        const next = Math.min(prev + advance, routeHistory.positions.length - 1);
-
-        const pos = routeHistory.positions[next];
-        if (pos && playbackMarkerRef.current) {
-          playbackMarkerRef.current.setLngLat([pos.longitude, pos.latitude]);
-          // Update arrow rotation
-          const el = playbackMarkerRef.current.getElement();
-          el.innerHTML = createArrowSvg("#2563EB", pos.course);
-
-          // Keep map centered on playback
-          map.easeTo({ center: [pos.longitude, pos.latitude], duration: 80 });
-        }
-
-        if (next >= routeHistory.positions.length - 1) {
-          setIsPlaying(false);
-          return next;
-        }
-        return next;
-      });
-
+      const finished = t >= trackEnd;
+      if (finished || now - lastUiUpdate > 100) {
+        lastUiUpdate = now;
+        setPlaybackTime(t);
+      }
+      if (finished) {
+        setIsPlaying(false);
+        return;
+      }
       animFrameRef.current = requestAnimationFrame(tick);
     };
-
     animFrameRef.current = requestAnimationFrame(tick);
 
     return () => {
@@ -901,43 +921,31 @@ export function TrackingMap() {
         animFrameRef.current = null;
       }
     };
-  }, [isPlaying, playbackSpeed, mapMode, routeHistory.positions]);
+  }, [isPlaying, playbackSpeed, mapMode, track, trackStart, trackEnd, placePlaybackMarker]);
 
   /* ── Playback helpers ──────────────────────────────── */
-  const formatPlaybackTime = useCallback((index: number) => {
-    if (routeHistory.positions.length === 0) return "00:00";
-    const pos = routeHistory.positions[Math.min(index, routeHistory.positions.length - 1)];
-    return new Date(pos.fixTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }, [routeHistory.positions]);
+  const formatPlaybackTime = useCallback(
+    (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    []
+  );
 
   const handlePlayPause = useCallback(() => {
-    if (playbackIndex >= routeHistory.positions.length - 1) {
-      setPlaybackIndex(0);
-    }
+    // Played to the end: start over
+    if ((playbackTimeRef.current ?? trackStart) >= trackEnd) seekTo(trackStart);
+    else if (playbackTimeRef.current === null) seekTo(trackStart);
     setIsPlaying((prev) => !prev);
-  }, [playbackIndex, routeHistory.positions.length]);
+  }, [trackStart, trackEnd, seekTo]);
 
-  const handleSeek = useCallback((pct: number) => {
-    const idx = Math.floor(pct * (routeHistory.positions.length - 1));
-    setPlaybackIndex(idx);
+  const handleSeek = useCallback(
+    (pct: number) => seekTo(trackStart + pct * (trackEnd - trackStart)),
+    [trackStart, trackEnd, seekTo]
+  );
 
-    const pos = routeHistory.positions[idx];
-    if (pos && playbackMarkerRef.current) {
-      playbackMarkerRef.current.setLngLat([pos.longitude, pos.latitude]);
-      const el = playbackMarkerRef.current.getElement();
-      el.innerHTML = createArrowSvg("#2563EB", pos.course);
-    }
-  }, [routeHistory.positions]);
-
-  const handleStepBack = useCallback(() => {
+  // Step buttons: to the previous or next GPS report
+  const handleStep = useCallback((direction: -1 | 1) => {
     setIsPlaying(false);
-    setPlaybackIndex((prev) => Math.max(0, prev - 10));
-  }, []);
-
-  const handleStepForward = useCallback(() => {
-    setIsPlaying(false);
-    setPlaybackIndex((prev) => Math.min(routeHistory.positions.length - 1, prev + 10));
-  }, [routeHistory.positions.length]);
+    seekTo(stepTo(fixTimes, playbackTimeRef.current ?? trackStart, direction));
+  }, [fixTimes, trackStart, seekTo]);
 
   /* ── History search handler ────────────────────────── */
   const handleHistorySearch = useCallback((deviceId: string, from: Date, to: Date) => {
@@ -1280,20 +1288,20 @@ export function TrackingMap() {
       )}
 
       {/* ── Playback Controls (history mode only) ── */}
-      {mapMode === "history" && routeHistory.positions.length > 1 && (
+      {mapMode === "history" && track.length > 1 && (
         <PlaybackControls
           isPlaying={isPlaying}
           speed={playbackSpeed}
-          progress={routeHistory.positions.length > 1 ? playbackIndex / (routeHistory.positions.length - 1) : 0}
-          currentTime={formatPlaybackTime(playbackIndex)}
-          totalTime={formatPlaybackTime(routeHistory.positions.length - 1)}
+          progress={trackEnd > trackStart ? ((playbackTime ?? trackStart) - trackStart) / (trackEnd - trackStart) : 0}
+          currentTime={formatPlaybackTime(playbackTime ?? trackStart)}
+          totalTime={formatPlaybackTime(trackEnd)}
           onPlayPause={handlePlayPause}
           onSpeedChange={setPlaybackSpeed}
           onSeek={handleSeek}
-          onSkipStart={() => { setIsPlaying(false); setPlaybackIndex(0); handleSeek(0); }}
-          onSkipEnd={() => { setIsPlaying(false); setPlaybackIndex(routeHistory.positions.length - 1); handleSeek(1); }}
-          onStepBack={handleStepBack}
-          onStepForward={handleStepForward}
+          onSkipStart={() => { setIsPlaying(false); seekTo(trackStart); }}
+          onSkipEnd={() => { setIsPlaying(false); seekTo(trackEnd); }}
+          onStepBack={() => handleStep(-1)}
+          onStepForward={() => handleStep(1)}
           onClose={switchToLive}
         />
       )}
