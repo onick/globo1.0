@@ -10,5 +10,5 @@
 
     <entry key='web.enable'>true</entry>
     <entry key='web.port'>8082</entry>
-    <entry key='web.path'>./modern</entry>
+    <entry key='web.path'>./web</entry>
 </properties>
