@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Globo GPS
 
-## Getting Started
+Plataforma SaaS multi-cliente de rastreo GPS de flotas, construida sobre [Traccar](https://www.traccar.org) como motor de recepción de rastreadores.
 
-First, run the development server:
+- **Mapa en vivo** de la flota y **historial** de recorridos ajustado a las calles (OSRM), con reproducción.
+- **Reportes de actividad:** viajes, paradas, ralentí y excesos de velocidad, exportables a CSV.
+- **Geocercas y alertas** (entrada, salida, exceso) calculadas por Globo en vivo, con **avisos** por correo y WhatsApp.
+- Panel de **administración** de clientes, usuarios, dispositivos y planes.
+
+Stack: Next.js 16 + React 19 + TypeScript, Prisma + PostgreSQL, Redis, Traccar, OSRM y MapLibre, todo en Docker Compose. Node 24 (`.nvmrc`).
+
+## Puesta en marcha (desarrollo)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env            # y completar contraseñas y secretos
+docker compose up -d            # Traccar, PostgreSQL, Redis, OSRM
+npm install
+npm run db:deploy               # aplica las migraciones
+npx prisma db seed              # planes y super admin de prueba
+scripts/osrm-prepare.sh         # una vez: mapa de calles para OSRM (docs/osrm.md)
+npm run dev                     # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Para ver vehículos moviéndose sin rastreadores reales:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+node --env-file=.env --import tsx scripts/simulate-devices.ts
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+El simulador publica en Traccar por el protocolo OsmAnd, igual que un rastreador, así que el mapa, el historial, los reportes y las alertas lo ven.
 
-## Learn More
+## Comandos
 
-To learn more about Next.js, take a look at the following resources:
+| Comando | Qué hace |
+|---|---|
+| `npm run dev` | Servidor de desarrollo |
+| `npm run typecheck` | Comprobación de tipos |
+| `npm run lint` | ESLint |
+| `npm test` | Pruebas unitarias (Vitest) |
+| `npm run build` | Compilación de producción |
+| `npm run db:migrate` | Crea una migración a partir de cambios en `prisma/schema.prisma` |
+| `npm run db:deploy` | Aplica las migraciones pendientes (producción) |
+| `npm run db:check` | Falla si el esquema y las migraciones no coinciden (necesita `SHADOW_DATABASE_URL`) |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Base de datos
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+El esquema vive en `prisma/schema.prisma` y **cada cambio va con su migración** en `prisma/migrations/`:
 
-## Deploy on Vercel
+1. Editar `schema.prisma`.
+2. `npm run db:migrate -- --name que_cambia`, que crea la migración y la aplica en local.
+3. Hacer commit del esquema y de la migración juntos.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+En producción solo se usa `npm run db:deploy`. No usar `prisma db push` fuera de pruebas desechables: no deja migración y puede borrar datos.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Calidad
+
+Cada pull request y cada push a `main` pasan por GitHub Actions (`.github/workflows/ci.yml`): tipos, lint, pruebas, migraciones al día con el esquema y compilación. Un PR con cualquiera de esos pasos en rojo no debería fusionarse.
+
+Las pruebas están junto al código que prueban (`src/**/*.test.ts`). La lógica de historial, reportes, alertas y avisos está en funciones puras de `src/lib/`, que es donde se prueba.
+
+## Documentación
+
+- [docs/osrm.md](docs/osrm.md): rutas ajustadas a las calles.
+- [docs/alertas.md](docs/alertas.md): geocercas, motor de alertas y avisos por correo y WhatsApp.
+- [docs/plans/](docs/plans/): diseño original del proyecto.
