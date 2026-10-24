@@ -52,6 +52,10 @@ export async function GET(request: Request) {
     include: {
       device: { select: { id: true, name: true, vehiclePlate: true } },
       geofence: { select: { id: true, name: true } },
+      // Delivery status outside the app, so each alert shows whether it reached anyone
+      notifications: {
+        select: { channel: true, address: true, status: true, attempts: true, lastError: true, sentAt: true },
+      },
     },
   });
 

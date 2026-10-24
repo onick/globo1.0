@@ -5,4 +5,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.TRACCAR_BRIDGE === "off") return;
   const { startTraccarBridge } = await import("./lib/websocket");
   startTraccarBridge();
+  // Sends the email/WhatsApp notifications the alert engine queues
+  const { startNotificationDispatcher } = await import("./lib/notify/dispatcher");
+  startNotificationDispatcher();
 }

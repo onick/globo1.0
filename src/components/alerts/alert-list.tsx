@@ -15,6 +15,37 @@ interface Alert {
   readAt: string | null;
   device: { id: string; name: string; vehiclePlate: string | null };
   geofence: { id: string; name: string } | null;
+  notifications: {
+    channel: "email" | "whatsapp";
+    address: string;
+    status: "pending" | "sent" | "failed";
+    attempts: number;
+    lastError: string | null;
+  }[];
+}
+
+const STATUS_STYLES = {
+  sent: "bg-green-100 text-green-700",
+  pending: "bg-amber-100 text-amber-800",
+  failed: "bg-red-100 text-red-700",
+};
+
+// One badge per notification; the tooltip has the address and, if any, the last error
+function Deliveries({ alert }: { alert: Alert }) {
+  if (!alert.notifications.length) return <span className="text-zinc-400">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {alert.notifications.map((n, i) => (
+        <span
+          key={i}
+          title={`${n.address}: ${n.status}${n.attempts > 1 ? ` after ${n.attempts} attempts` : ""}${n.lastError ? ` — ${n.lastError}` : ""}`}
+          className={`px-1.5 py-0.5 rounded text-xs font-normal ${STATUS_STYLES[n.status]}`}
+        >
+          {n.channel === "email" ? "Email" : "WhatsApp"} {n.status}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 const TYPE_LABELS: Record<Alert["type"], string> = {
@@ -113,7 +144,7 @@ export function AlertList() {
           <table className="w-full text-sm">
             <thead className="text-left text-zinc-500">
               <tr>
-                {["Time", "Vehicle", "Alert", "Detail", "Location", ""].map((h) => (
+                {["Time", "Vehicle", "Alert", "Detail", "Location", "Sent", ""].map((h) => (
                   <th key={h} className="px-4 py-2 font-normal whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -130,6 +161,9 @@ export function AlertList() {
                   <td className="px-4 py-2">{detail(a)}</td>
                   <td className="px-4 py-2 tabular-nums text-zinc-500">
                     {a.latitude.toFixed(5)}, {a.longitude.toFixed(5)}
+                  </td>
+                  <td className="px-4 py-2">
+                    <Deliveries alert={a} />
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap space-x-3">
                     <Link href={mapLink(a)} className="inline-flex items-center gap-1 text-blue-600 hover:underline">

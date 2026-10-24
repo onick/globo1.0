@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { redis } from "@/lib/redis";
 import { DEFAULT_SPEED_LIMIT_KMH } from "@/lib/activity";
 import { knotsToKmh } from "@/lib/history";
+import { enqueueNotifications } from "@/lib/notify/dispatcher";
 import {
   evaluatePosition,
   type DeviceAlertState,
@@ -104,7 +105,9 @@ export async function processAlerts(positions: BridgePosition[]) {
     if (state) await redis.set(stateKey(traccarId), JSON.stringify(state));
     if (!alerts.length) continue;
 
-    await db.alert.createMany({
+    // Only the alerts actually inserted come back (duplicates are skipped), so a replayed
+    // position never notifies twice
+    const created = await db.alert.createManyAndReturn({
       data: alerts.map((a) => ({
         tenantId: device.tenantId,
         deviceId: device.id,
@@ -118,6 +121,8 @@ export async function processAlerts(positions: BridgePosition[]) {
         dedupKey: `${device.id}:${a.type}:${a.geofenceId ?? ""}:${new Date(a.time).toISOString()}`,
       })),
       skipDuplicates: true,
+      select: { id: true, tenantId: true, type: true },
     });
+    await enqueueNotifications(created);
   }
 }
