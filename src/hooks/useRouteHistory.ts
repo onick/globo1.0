@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import type { RoutePoint, RouteStop, RouteSummary } from "@/lib/history";
 import { haversineKm } from "@/lib/history";
 import { lengthKm, locateOnLine, pathBetween, type PathLocation } from "@/lib/route-path";
+import { buildTrack, type TrackPoint } from "@/lib/playback";
 
 // The history is computed on the server (/api/history): positions in km/h, stops with the
 // same rules as the reports and alerts, and the route snapped to the roads when OSRM is
@@ -177,7 +178,13 @@ export function shapeHistory(data: HistoryResponse) {
     stopCount: stops.length,
   };
 
-  return { positions, segments, stops, summary, baseLine: line };
+  // Timed points for playback, along the roads between consecutive fixes
+  const track = buildTrack(
+    positions.map((p) => ({ time: ms(p.fixTime), longitude: p.longitude, latitude: p.latitude, speed: p.speed, course: p.course })),
+    line && locations ? positions.slice(1).map((_, i) => pathBetween(line, locations[i], locations[i + 1])) : null
+  );
+
+  return { positions, segments, stops, summary, baseLine: line, track };
 }
 
 /* ── Hook ──────────────────────────────────────────────── */
@@ -189,6 +196,7 @@ export function useRouteHistory() {
   const [summary, setSummary] = useState<TripSummary | null>(null);
   // Whole route along the roads; null when it couldn't be matched (GPS line instead)
   const [baseLine, setBaseLine] = useState<LngLat[] | null>(null);
+  const [track, setTrack] = useState<TrackPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -198,6 +206,7 @@ export function useRouteHistory() {
     setStops([]);
     setSummary(null);
     setBaseLine(null);
+    setTrack([]);
   }, []);
 
   const fetchHistory = useCallback(async (deviceId: string, from: Date, to: Date) => {
@@ -222,6 +231,7 @@ export function useRouteHistory() {
       setStops(shaped.stops);
       setSummary(shaped.summary);
       setBaseLine(shaped.baseLine);
+      setTrack(shaped.track);
     } catch (err) {
       reset();
       setError(err instanceof Error ? err.message : "Failed to load history");
@@ -236,5 +246,5 @@ export function useRouteHistory() {
     setError(null);
   }, [reset]);
 
-  return { positions, segments, stops, summary, baseLine, loading, error, fetchHistory, clear };
+  return { positions, segments, stops, summary, baseLine, track, loading, error, fetchHistory, clear };
 }
