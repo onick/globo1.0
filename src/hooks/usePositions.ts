@@ -59,42 +59,59 @@ function computeTrackingStatus(
   return "idle";
 }
 
+async function fetchPositions(): Promise<Map<number, Position> | null> {
+  try {
+    const res = await fetch("/api/positions");
+    if (!res.ok) return null;
+    const data: Position[] = await res.json();
+    return new Map(data.map((p) => [p.deviceId, p]));
+  } catch (err) {
+    console.error("Failed to load positions:", err);
+    return null;
+  }
+}
+
+async function fetchDevices(): Promise<Device[] | null> {
+  try {
+    const res = await fetch("/api/devices");
+    return res.ok ? await res.json() : null;
+  } catch (err) {
+    console.error("Failed to load devices:", err);
+    return null;
+  }
+}
+
 export function usePositions() {
   const [positions, setPositions] = useState<Map<number, Position>>(new Map());
   const [devices, setDevices] = useState<Device[]>([]);
 
+  // State is set from the requests' callbacks, never synchronously inside the effect
+  useEffect(() => {
+    let active = true;
+    const refreshPositions = () =>
+      fetchPositions().then((map) => {
+        if (active && map) setPositions(map);
+      });
+    fetchDevices().then((list) => {
+      if (active && list) setDevices(list);
+    });
+    refreshPositions();
+    const interval = setInterval(refreshPositions, 3000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   const loadPositions = useCallback(async () => {
-    try {
-      const res = await fetch("/api/positions");
-      if (res.ok) {
-        const data: Position[] = await res.json();
-        const map = new Map<number, Position>();
-        data.forEach((p) => map.set(p.deviceId, p));
-        setPositions(map);
-      }
-    } catch (err) {
-      console.error("Failed to load positions:", err);
-    }
+    const map = await fetchPositions();
+    if (map) setPositions(map);
   }, []);
 
   const loadDevices = useCallback(async () => {
-    try {
-      const res = await fetch("/api/devices");
-      if (res.ok) {
-        setDevices(await res.json());
-      }
-    } catch (err) {
-      console.error("Failed to load devices:", err);
-    }
+    const list = await fetchDevices();
+    if (list) setDevices(list);
   }, []);
-
-  // Initial loads
-  useEffect(() => {
-    loadDevices();
-    loadPositions();
-    const interval = setInterval(loadPositions, 3000);
-    return () => clearInterval(interval);
-  }, [loadDevices, loadPositions]);
 
   // Build tracked devices: merge devices + positions
   const trackedDevices: TrackedDevice[] = devices.map((device) => {

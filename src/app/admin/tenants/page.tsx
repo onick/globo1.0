@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Building2, Plus, Search, Pencil, Trash2, Download, ChevronDown } from "lucide-react";
 import { TenantForm } from "@/components/admin/tenant-form";
+import { usePageResetOn } from "@/hooks/usePageResetOn";
 
 interface Tenant {
   id: string;
@@ -33,7 +34,8 @@ export default function TenantsPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  // Back to page 1 whenever a filter changes
+  const [page, setPage] = usePageResetOn(JSON.stringify([search, statusFilter]));
   const [editing, setEditing] = useState<Tenant | undefined>();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -77,9 +79,6 @@ export default function TenantsPage() {
     return matchesSearch && matchesStatus;
   });
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

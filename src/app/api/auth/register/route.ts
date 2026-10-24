@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
+import { slugify } from "@/lib/slug";
 
 export async function POST(request: Request) {
   try {
@@ -23,10 +24,7 @@ export async function POST(request: Request) {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const slug = tenantName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
+    const slug = slugify(tenantName);
 
     const tenant = await db.tenant.create({
       data: {

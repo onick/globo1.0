@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
   TrendingUp,
-  Eye,
   ArrowUpRight,
   Truck,
 } from "lucide-react";
@@ -88,6 +87,21 @@ const topVehicles = [
 const barData1 = [20, 35, 15, 45, 60, 50, 70, 40, 55, 30, 25, 65];
 const barData2 = [30, 15, 45, 25, 60, 35, 50, 20, 40, 55, 30, 45];
 
+// TODO(product): totalDistance is a fixed number and the fallback is sample data; both are
+// shown to customers as if real
+async function loadStats() {
+  try {
+    const res = await fetch("/api/positions");
+    if (res.ok) {
+      const data = await res.json();
+      return { activeDevices: data.length || 0, totalDistance: 48291, totalVehicles: data.length || 0 };
+    }
+  } catch {
+    // fall through to the sample data below
+  }
+  return { activeDevices: 342, totalDistance: 48291, totalVehicles: 54 };
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState({
     activeDevices: 0,
@@ -95,26 +109,16 @@ export default function DashboardPage() {
     totalVehicles: 0,
   });
 
-  const fetchStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/positions");
-      if (res.ok) {
-        const data = await res.json();
-        setStats({
-          activeDevices: data.length || 0,
-          totalDistance: 48291,
-          totalVehicles: data.length || 0,
-        });
-      }
-    } catch {
-      // fallback to mock data
-      setStats({ activeDevices: 342, totalDistance: 48291, totalVehicles: 54 });
-    }
-  }, []);
-
+  // Loaded once; state is set from the request's callback, not synchronously in the effect
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    let active = true;
+    loadStats().then((next) => {
+      if (active) setStats(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-US", {

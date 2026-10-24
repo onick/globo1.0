@@ -11,6 +11,7 @@ import {
   Download,
 } from "lucide-react";
 import { UserForm } from "@/components/admin/user-form";
+import { usePageResetOn } from "@/hooks/usePageResetOn";
 
 interface User {
   id: string;
@@ -43,7 +44,8 @@ export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [tenantFilter, setTenantFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  // Back to page 1 whenever a filter changes
+  const [page, setPage] = usePageResetOn(JSON.stringify([search, roleFilter, tenantFilter]));
   const [editing, setEditing] = useState<User | undefined>();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -94,9 +96,6 @@ export default function UsersPage() {
     return matchesSearch && matchesRole && matchesTenant;
   });
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, roleFilter, tenantFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Trash2 } from "lucide-react";
@@ -42,14 +42,22 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/geofences");
-    if (res.ok) setGeofences(await res.json());
-  }, []);
+  // Bumped to reload the list after saving
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
+    let active = true;
+    fetch("/api/geofences")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((list: Geofence[] | null) => {
+        if (active && list) setGeofences(list);
+      });
+    return () => {
+      active = false;
+    };
+  }, [version]);
+
+  useEffect(() => {
     if (isSuperAdmin) {
       fetch("/api/admin/tenants")
         .then((res) => (res.ok ? res.json() : []))
@@ -58,7 +66,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           if (data.length) setTenantId(data[0].id);
         });
     }
-  }, [load, isSuperAdmin]);
+  }, [isSuperAdmin]);
 
   // Map: saved geofences in blue, the one being drawn in orange; click to place the center
   useEffect(() => {
@@ -142,7 +150,7 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     }
     setCenter(null);
     setName("");
-    load();
+    setVersion((v) => v + 1);
   }
 
   async function remove(g: Geofence) {

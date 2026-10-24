@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { DeviceTable } from "@/components/devices/device-table";
+import { DeviceTable, type Device } from "@/components/devices/device-table";
 import { DeviceForm } from "@/components/devices/device-form";
 import {
   Plus,
@@ -13,19 +13,6 @@ import {
   Search,
 } from "lucide-react";
 
-interface Device {
-  id: string;
-  name: string;
-  imei: string;
-  status: string;
-  vehiclePlate: string | null;
-  vehicleType: string | null;
-  driverName: string | null;
-  driverPhone: string | null;
-  speedLimitKmh: number | null;
-  traccarId: number | null;
-  createdAt: string;
-}
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);

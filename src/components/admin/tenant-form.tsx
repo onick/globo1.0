@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { slugify } from "@/lib/slug";
 import { Loader2 } from "lucide-react";
 
 interface Tenant {
@@ -23,19 +24,10 @@ export function TenantForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [name, setName] = useState(tenant?.name ?? "");
-  const [slug, setSlug] = useState(tenant?.slug ?? "");
+  const [slugInput, setSlugInput] = useState(tenant?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(false);
-
-  useEffect(() => {
-    if (!slugTouched && !tenant) {
-      setSlug(
-        name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-      );
-    }
-  }, [name, slugTouched, tenant]);
+  // New tenants get a slug from the name until it's edited by hand
+  const slug = tenant || slugTouched ? slugInput : slugify(name);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -100,7 +92,7 @@ export function TenantForm({
             className="input input-bordered w-full font-mono text-sm"
             value={slug}
             onChange={(e) => {
-              setSlug(e.target.value);
+              setSlugInput(e.target.value);
               setSlugTouched(true);
             }}
           />

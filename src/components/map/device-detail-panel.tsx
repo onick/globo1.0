@@ -131,8 +131,9 @@ export function DeviceDetailPanel({
   onFollowToggle,
   onRouteToggle,
 }: DeviceDetailPanelProps) {
-  const [address, setAddress] = useState<string | null>(null);
-  const [addressLoading, setAddressLoading] = useState(false);
+  // Address resolved for a given position; a new position shows "loading" until its own
+  // address arrives, without resetting state from the effect
+  const [resolved, setResolved] = useState<{ key: string; address: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const color = STATUS_COLORS[device.trackingStatus];
@@ -140,20 +141,23 @@ export function DeviceDetailPanel({
   const hasPosition = !!device.position;
   const VehicleIcon = VEHICLE_ICONS[device.vehicleType || "truck"] || Truck;
 
+  const lat = device.position?.latitude;
+  const lng = device.position?.longitude;
+  const positionKey = lat !== undefined && lng !== undefined ? `${lat},${lng}` : null;
+  const address = resolved && resolved.key === positionKey ? resolved.address : null;
+  const addressLoading = positionKey !== null && resolved?.key !== positionKey;
+
   // Load address when device has position
   useEffect(() => {
-    if (!device.position) {
-      setAddress(null);
-      return;
-    }
-    setAddressLoading(true);
-    reverseGeocode(device.position.latitude, device.position.longitude).then(
-      (addr) => {
-        setAddress(addr);
-        setAddressLoading(false);
-      }
-    );
-  }, [device.position?.latitude, device.position?.longitude]);
+    if (lat === undefined || lng === undefined) return;
+    let active = true;
+    reverseGeocode(lat, lng).then((addr) => {
+      if (active) setResolved({ key: `${lat},${lng}`, address: addr });
+    });
+    return () => {
+      active = false;
+    };
+  }, [lat, lng]);
 
   const handleCopyLocation = useCallback(async () => {
     if (!device.position) return;
