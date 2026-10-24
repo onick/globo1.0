@@ -1,7 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { BellRing, Mail, MessageCircle, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { FormField } from "@/components/shared/form-field";
+import { PageHeader } from "@/components/shared/page-header";
 
 type Channel = "email" | "whatsapp";
 type AlertType = "geofence_enter" | "geofence_exit" | "overspeed";
@@ -29,18 +40,23 @@ const ALL_TYPES = Object.keys(TYPE_LABELS) as AlertType[];
 
 const CHANNEL_LABELS: Record<Channel, string> = { email: "Email", whatsapp: "WhatsApp" };
 
+const CHANNEL_ICONS = { email: Mail, whatsapp: MessageCircle };
+
 function TypeChecks({ value, onChange }: { value: AlertType[]; onChange: (types: AlertType[]) => void }) {
+  const id = useId();
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className="flex flex-wrap gap-x-4 gap-y-2">
       {ALL_TYPES.map((t) => (
-        <label key={t} className="flex items-center gap-1.5 text-sm">
-          <input
-            type="checkbox"
+        <div key={t} className="flex items-center gap-2">
+          <Checkbox
+            id={`${id}-${t}`}
             checked={value.includes(t)}
-            onChange={(e) => onChange(e.target.checked ? [...value, t] : value.filter((x) => x !== t))}
+            onCheckedChange={(checked) => onChange(checked ? [...value, t] : value.filter((x) => x !== t))}
           />
-          {TYPE_LABELS[t]}
-        </label>
+          <Label htmlFor={`${id}-${t}`} className="text-sm font-normal">
+            {TYPE_LABELS[t]}
+          </Label>
+        </div>
       ))}
     </div>
   );
@@ -96,6 +112,7 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
       setError(data.error || "Could not add the recipient");
       return;
     }
+    toast.success(`${address.trim()} will receive alerts`);
     setAddress("");
     setVersion((v) => v + 1);
   }
@@ -109,101 +126,157 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
       body: JSON.stringify(data),
     });
     if (res.ok) setRecipients((list) => list.map((x) => (x.id === r.id ? { ...x, ...data } : x)));
+    else toast.error("Could not save the change");
   }
 
   async function remove(r: Recipient) {
-    if (!confirm(`Stop sending alerts to ${r.address}?`)) return;
     const res = await fetch(`/api/notification-recipients/${r.id}`, { method: "DELETE" });
-    if (res.ok) setRecipients((list) => list.filter((x) => x.id !== r.id));
+    if (res.ok) {
+      setRecipients((list) => list.filter((x) => x.id !== r.id));
+      toast.success(`${r.address} removed`);
+    } else {
+      toast.error("Could not remove the recipient");
+    }
   }
 
   return (
-    <div className="bg-white border rounded-lg p-4 space-y-4 max-w-3xl">
-      <div>
-        <h2 className="font-semibold">Alert notifications</h2>
-        <p className="text-sm text-zinc-500">
-          Who gets alerts by email or WhatsApp. Failed sends are retried for about 45 minutes.
-        </p>
-      </div>
+    <div className="space-y-5 max-w-4xl">
+      <PageHeader
+        title="Notifications"
+        description="Who gets alerts by email or WhatsApp. Failed sends are retried for about 45 minutes."
+      />
 
       {(Object.keys(channels) as Channel[])
         .filter((c) => !channels[c])
         .map((c) => (
-          <div key={c} className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            {CHANNEL_LABELS[c]} isn&apos;t configured on the server: {CHANNEL_LABELS[c]} recipients
-            won&apos;t receive anything until it is (see docs/alertas.md).
-          </div>
+          <Alert key={c} className="border-amber-200 bg-amber-50 text-amber-900">
+            <TriangleAlert />
+            <AlertDescription className="text-amber-800">
+              {CHANNEL_LABELS[c]} isn&apos;t configured on the server: {CHANNEL_LABELS[c]} recipients won&apos;t
+              receive anything until it is (see docs/alertas.md).
+            </AlertDescription>
+          </Alert>
         ))}
 
-      <div className="border rounded-md p-3 space-y-3">
+      <div className="bg-card border rounded-xl p-5 space-y-4">
+        <h2 className="text-sm font-semibold text-foreground">Add recipient</h2>
         <div className="flex flex-wrap items-end gap-3">
           {isSuperAdmin && (
-            <label className="flex flex-col gap-1 text-sm">
-              Client
-              <select value={tenantId} onChange={(e) => setTenantId(e.target.value)} className="border rounded-md px-3 py-2 text-sm">
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </label>
+            <FormField label="Client" className="w-48">
+              <Select value={tenantId} onValueChange={setTenantId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Choose a client" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tenants.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
           )}
-          <label className="flex flex-col gap-1 text-sm">
-            Channel
-            <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)} className="border rounded-md px-3 py-2 text-sm">
-              <option value="email">Email</option>
-              <option value="whatsapp">WhatsApp</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm flex-1 min-w-56">
-            {channel === "email" ? "Email address" : "WhatsApp number (with country code)"}
-            <input
+          <FormField label="Channel" className="w-40">
+            <Select value={channel} onValueChange={(v) => setChannel(v as Channel)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="email">
+                  <Mail /> Email
+                </SelectItem>
+                <SelectItem value="whatsapp">
+                  <MessageCircle /> WhatsApp
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
+          <FormField
+            label={channel === "email" ? "Email address" : "WhatsApp number (with country code)"}
+            htmlFor="recipient-address"
+            className="flex-1 min-w-56"
+          >
+            <Input
+              id="recipient-address"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               placeholder={channel === "email" ? "ops@company.com" : "18095551234"}
-              className="border rounded-md px-3 py-2 text-sm"
             />
-          </label>
+          </FormField>
         </div>
-        <TypeChecks value={types} onChange={setTypes} />
-        {error && <div className="text-sm text-red-600">{error}</div>}
-        <button
-          onClick={add}
-          disabled={!address.trim() || !types.length}
-          className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800 disabled:opacity-50"
-        >
+        <FormField label="Alerts to send">
+          <TypeChecks value={types} onChange={setTypes} />
+        </FormField>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button onClick={add} disabled={!address.trim() || !types.length}>
+          <Plus />
           Add recipient
-        </button>
+        </Button>
       </div>
 
-      {recipients.length === 0 ? (
-        <p className="text-sm text-zinc-500">No recipients yet.</p>
-      ) : (
-        <ul className="divide-y border rounded-md">
-          {recipients.map((r) => (
-            <li key={r.id} className="p-3 space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm">
-                  <span className="font-medium">{r.address}</span>
-                  <span className="text-zinc-500">
-                    {" "}· {CHANNEL_LABELS[r.channel]}
-                    {isSuperAdmin ? ` · ${r.tenant.name}` : ""}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-1.5 text-sm">
-                    <input type="checkbox" checked={r.active} onChange={(e) => update(r, { active: e.target.checked })} />
-                    Active
-                  </label>
-                  <button onClick={() => remove(r)} aria-label={`Delete ${r.address}`} className="p-1.5 rounded hover:bg-zinc-100">
-                    <Trash2 className="h-4 w-4 text-red-500" />
-                  </button>
-                </div>
-              </div>
-              <TypeChecks value={r.alertTypes} onChange={(alertTypes) => update(r, { alertTypes })} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="bg-card border rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <h2 className="text-sm font-semibold text-foreground">Recipients</h2>
+          <span className="text-xs text-muted-foreground">{recipients.length}</span>
+        </div>
+        {recipients.length === 0 ? (
+          <div className="py-12 text-center">
+            <BellRing className="size-10 text-slate-300 mx-auto" />
+            <p className="text-sm text-muted-foreground mt-3">No recipients yet. Add one above.</p>
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {recipients.map((r) => {
+              const Icon = CHANNEL_ICONS[r.channel];
+              return (
+                <li key={r.id} className={`px-5 py-4 space-y-3 ${r.active ? "" : "opacity-60"}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="size-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <Icon className="size-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-foreground truncate">{r.address}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {CHANNEL_LABELS[r.channel]}
+                          {isSuperAdmin ? ` · ${r.tenant.name}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id={`active-${r.id}`}
+                          checked={r.active}
+                          onCheckedChange={(active) => update(r, { active })}
+                        />
+                        <Label htmlFor={`active-${r.id}`} className="text-sm font-normal">
+                          Active
+                        </Label>
+                      </div>
+                      <ConfirmDialog
+                        title="Remove recipient?"
+                        description={`${r.address} will stop receiving alerts.`}
+                        confirmLabel="Remove"
+                        onConfirm={() => remove(r)}
+                        trigger={
+                          <Button variant="ghost" size="icon-sm" aria-label={`Delete ${r.address}`} className="text-muted-foreground hover:text-destructive">
+                            <Trash2 />
+                          </Button>
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="pl-11">
+                    <TypeChecks value={r.alertTypes} onChange={(alertTypes) => update(r, { alertTypes })} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

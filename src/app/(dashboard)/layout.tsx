@@ -2,6 +2,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default async function DashboardLayout({
   children,
@@ -17,8 +19,11 @@ export default async function DashboardLayout({
       {/* min-w-0: wide content (report tables) scrolls inside its box instead of widening the page */}
       <div className="flex-1 flex flex-col min-w-0">
         <Header />
-        <main className="flex-1 p-5 overflow-auto">{children}</main>
+        <main className="flex-1 p-5 overflow-auto">
+          <TooltipProvider delayDuration={200}>{children}</TooltipProvider>
+        </main>
       </div>
+      <Toaster position="bottom-right" richColors />
     </div>
   );
 }

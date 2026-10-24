@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FormField } from "@/components/shared/form-field";
 
 interface DeviceOption {
   id: string;
@@ -93,41 +98,28 @@ export function DeviceRangeFilters({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-3 bg-white border rounded-lg p-4">
-      <label className="flex flex-col gap-1 text-sm">
-        Device
-        <select
-          value={range.deviceId}
-          onChange={(e) => range.setDeviceId(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm min-w-48"
-        >
-          {range.devices.length === 0 && <option value="">No linked devices</option>}
-          {range.devices.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-              {d.vehiclePlate ? ` · ${d.vehiclePlate}` : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        From
-        <input
-          type="datetime-local"
-          value={range.from}
-          onChange={(e) => range.setFrom(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        To
-        <input
-          type="datetime-local"
-          value={range.to}
-          onChange={(e) => range.setTo(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
-        />
-      </label>
+    <div className="bg-card border rounded-xl p-4 flex flex-wrap items-end gap-3">
+      <FormField label="Vehicle" className="min-w-56">
+        <Select value={range.deviceId} onValueChange={range.setDeviceId} disabled={range.devices.length === 0}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={range.devicesLoaded ? "No linked vehicles" : "Loading…"} />
+          </SelectTrigger>
+          <SelectContent>
+            {range.devices.map((d) => (
+              <SelectItem key={d.id} value={d.id}>
+                {d.name}
+                {d.vehiclePlate ? <span className="text-muted-foreground">· {d.vehiclePlate}</span> : null}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
+      <FormField label="From">
+        <Input type="datetime-local" value={range.from} onChange={(e) => range.setFrom(e.target.value)} className="w-auto" />
+      </FormField>
+      <FormField label="To">
+        <Input type="datetime-local" value={range.to} onChange={(e) => range.setTo(e.target.value)} className="w-auto" />
+      </FormField>
       <div className="flex gap-1">
         {(
           [
@@ -136,23 +128,16 @@ export function DeviceRangeFilters({
             ["week", "Last 7 days"],
           ] as const
         ).map(([preset, label]) => (
-          <button
-            key={preset}
-            onClick={() => range.applyPreset(preset)}
-            className="px-3 py-2 border rounded-md text-sm hover:bg-zinc-100"
-          >
+          <Button key={preset} variant="outline" onClick={() => range.applyPreset(preset)}>
             {label}
-          </button>
+          </Button>
         ))}
       </div>
       {children}
-      <button
-        onClick={onSubmit}
-        disabled={!range.deviceId || loading}
-        className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800 disabled:opacity-50"
-      >
-        {loading ? "Loading..." : submitLabel}
-      </button>
+      <Button onClick={onSubmit} disabled={!range.deviceId || loading} className="ml-auto">
+        {loading && <Loader2 className="animate-spin" />}
+        {submitLabel}
+      </Button>
     </div>
   );
 }
