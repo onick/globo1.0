@@ -24,6 +24,15 @@ beforeEach(async () => {
 // Every change a client user can ask for, on their own client's data
 const CHANGES: [string, Action, () => Promise<{ status: number }>][] = [
   ["add a vehicle", "vehicles:create", () => call(devices.POST, { method: "POST", body: { name: "New", imei: "imei-new" } })],
+  [
+    "add a vehicle with its tracker and SIM",
+    "vehicles:configure",
+    () =>
+      call(devices.POST, {
+        method: "POST",
+        body: { name: "New", imei: "imei-new-2", trackerModel: "concox-gt06e", simNumber: "8096728477", simCarrier: "Claro", apn: "internet" },
+      }),
+  ],
   ["edit a vehicle", "vehicles:edit", () => call(device.PATCH, { method: "PATCH", params: { id: w.a.device.id }, body: { name: "Renamed" } })],
   [
     "set the tracker model and SIM",
@@ -111,6 +120,25 @@ describe("device detail", () => {
     signInAs(w.a.admin);
     const { status } = await call(deviceImei.POST, { method: "POST", params: { id: w.a.device.id }, body: { imei: w.b.device.imei } });
     expect(status).toBe(409);
+  });
+});
+
+describe("adding a vehicle with its tracker", () => {
+  it("stores the model and SIM", async () => {
+    signInAs(w.a.admin);
+    const { status, body } = await call(devices.POST, {
+      method: "POST",
+      body: { name: "New", imei: "imei-new-3", trackerModel: "concox-gt06e", simNumber: "8096728477", simCarrier: "Claro" },
+    });
+    expect(status).toBe(201);
+    expect(body).toMatchObject({ tenantId: w.a.tenant.id, trackerModel: "concox-gt06e", simNumber: "8096728477", simCarrier: "Claro" });
+  });
+
+  it("rejects an unknown model", async () => {
+    signInAs(w.a.admin);
+    const { status } = await call(devices.POST, { method: "POST", body: { name: "New", imei: "imei-new-4", trackerModel: "nokia" } });
+    expect(status).toBe(400);
+    expect(await db.device.count({ where: { imei: "imei-new-4" } })).toBe(0);
   });
 });
 

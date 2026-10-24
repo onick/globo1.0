@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Cpu, Plus, Search, Pencil, Trash2, ChevronDown, Download } from "lucide-react";
+import Link from "next/link";
+import { Cpu, Plus, Search, Pencil, Trash2, ChevronDown, Download, Settings2 } from "lucide-react";
 import { DeviceForm } from "@/components/admin/device-form";
 import { usePageResetOn } from "@/hooks/usePageResetOn";
 
@@ -249,7 +250,9 @@ export default function AdminDevicesPage() {
                 className="border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC] transition-colors"
               >
                 <td className="px-5 py-3 text-[13px] font-medium text-[#0F172A]">
-                  {device.name}
+                  <Link href={`/devices/${device.id}`} className="hover:text-[#2563EB] hover:underline">
+                    {device.name}
+                  </Link>
                 </td>
                 <td className="px-5 py-3 text-[12px] font-mono text-[#94A3B8] tabular-nums">
                   {device.imei}
@@ -290,8 +293,17 @@ export default function AdminDevicesPage() {
                 </td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-1">
+                    {/* Tracker model, SIM, SMS setup and IMEI history */}
+                    <Link
+                      href={`/devices/${device.id}`}
+                      title="Tracker, SIM and setup"
+                      className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-[#2563EB] hover:bg-[#DBEAFE] transition-colors"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                    </Link>
                     <button
                       onClick={() => openEdit(device)}
+                      title="Quick edit (and move to another client)"
                       className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-[#2563EB] hover:bg-[#DBEAFE] transition-colors"
                     >
                       <Pencil className="h-3.5 w-3.5" />

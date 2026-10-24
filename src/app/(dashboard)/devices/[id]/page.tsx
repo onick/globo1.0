@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, Copy, History, Loader2, RefreshCw, Server, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -51,6 +51,8 @@ interface DeviceDetail {
   imeiChanges: { id: string; oldImei: string; newImei: string; reason: string | null; changedBy: string; changedAt: string }[];
   permissions: { edit: boolean; configure: boolean; delete: boolean };
 }
+
+const TABS = ["general", "tracker", "commands", "history"];
 
 // Radix Select can't use "" as an item value
 const NONE = "none";
@@ -494,7 +496,9 @@ export default function DeviceDetailPage() {
   // Bumped to reload after saving. The forms remount when the saved device arrives (keyed
   // by updatedAt), and the tab stays
   const [version, setVersion] = useState(0);
-  const [tab, setTab] = useState("general");
+  // ?tab=commands opens straight on a tab, e.g. after adding the device
+  const requestedTab = useSearchParams().get("tab");
+  const [tab, setTab] = useState(TABS.includes(requestedTab ?? "") ? requestedTab! : "general");
 
   useEffect(() => {
     let active = true;

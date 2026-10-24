@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { parseSpeedLimit } from "@/lib/speed-limit";
+import { parseDeviceConfig } from "@/lib/device-config";
 import { auth } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
@@ -31,12 +32,20 @@ export async function POST(request: Request) {
   const { tenantId, role } = session.user as Record<string, unknown>;
   if (!can(role, "vehicles:create")) return forbiddenResponse();
 
-  const { name, imei, vehiclePlate, vehicleType, driverName, driverPhone, speedLimitKmh, tenantId: bodyTenantId } = await request.json();
+  const body = await request.json();
+  const { name, imei, vehiclePlate, vehicleType, driverName, driverPhone, speedLimitKmh, tenantId: bodyTenantId } = body;
 
   const speedLimit = parseSpeedLimit(speedLimitKmh);
   if ("error" in speedLimit) {
     return NextResponse.json({ error: speedLimit.error }, { status: 400 });
   }
+
+  // Tracker model and SIM, if given: only roles that configure trackers may set them
+  const config = parseDeviceConfig(body);
+  if ("error" in config) {
+    return NextResponse.json({ error: config.error }, { status: 400 });
+  }
+  if (Object.keys(config.data).length && !can(role, "vehicles:configure")) return forbiddenResponse();
 
   if (!name || !imei) {
     return NextResponse.json(
@@ -101,6 +110,7 @@ export async function POST(request: Request) {
       driverName: driverName || null,
       driverPhone: driverPhone || null,
       speedLimitKmh: speedLimit.value ?? null,
+      ...config.data,
     },
   });
 
