@@ -30,6 +30,15 @@ describe("detectTrips", () => {
     expect(trips[1].maxSpeedKmh).toBe(95);
   });
 
+  it("doesn't count a long gap without reports as driving", () => {
+    // Drives 2 min, the tracker goes silent for an hour, drives 2 more min elsewhere
+    const points = [fix(0, 18.48, 40), fix(1, 18.49, 40), fix(2, 18.5, 40), fix(62, 18.6, 40), fix(63, 18.61, 40), fix(64, 18.62, 40)];
+    const trips = detectTrips(points, []);
+    expect(trips.map((t) => t.durationMin)).toEqual([2, 2]);
+    // The 11 km jump across the gap isn't in either trip
+    expect(trips[0].distanceKm + trips[1].distanceKm).toBeCloseTo(4.45, 1);
+  });
+
   it("ignores GPS jitter around a parked vehicle", () => {
     const jitter = [fix(0, 18.5, 0), fix(4, 18.5, 0), fix(5, 18.5003, 5), fix(6, 18.5, 0), fix(10, 18.5, 0)];
     expect(detectTrips(jitter, detectStops(jitter))).toEqual([]);

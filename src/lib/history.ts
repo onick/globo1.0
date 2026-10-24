@@ -39,6 +39,9 @@ export const MAX_RANGE_DAYS = 7;
 // A stop is at least this long with the speed at or below the threshold.
 export const STOP_MIN_DURATION_MIN = 3;
 export const STOP_MAX_SPEED_KMH = 3;
+// Longer than this between two reports, what the vehicle did is unknown (tracker off, no
+// coverage): trips don't span such a gap
+export const MAX_REPORT_GAP_MIN = 15;
 
 // Traccar reports speed in knots.
 export function knotsToKmh(knots: number): number {
