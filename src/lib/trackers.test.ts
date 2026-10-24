@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { serverAddress, trackerModel, TRACKER_MODELS, validateImei, type TrackerConfig } from "@/lib/trackers";
+import { serverAddress, trackerHostKind, trackerModel, TRACKER_MODELS, validateImei, type TrackerConfig } from "@/lib/trackers";
 
 const config: TrackerConfig = { host: "13.127.228.11", apn: "internet.claro", apnUser: null, apnPassword: null };
 const texts = (id: string, c: TrackerConfig = config) => {
@@ -75,5 +75,24 @@ describe("validateImei", () => {
 
   it.each(["", "123", "35231 2096734457", null, "x".repeat(21)])("rejects %s", (value) => {
     expect(validateImei(value)).toHaveProperty("error");
+  });
+});
+
+describe("trackerHostKind", () => {
+  it.each([
+    ["trackers.globo.do", "domain"],
+    ["gps.example.com", "domain"],
+    ["13.127.228.11", "ip"],
+    ["300.1.1.1", "invalid"],
+    ["localhost", "invalid"],
+    ["globo .do", "invalid"],
+    ["-bad.example.com", "invalid"],
+  ])("%s is %s", (host, kind) => {
+    expect(trackerHostKind(host)).toBe(kind);
+  });
+
+  it("is null when not configured", () => {
+    expect(trackerHostKind(null)).toBeNull();
+    expect(trackerHostKind("")).toBeNull();
   });
 });

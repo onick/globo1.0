@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/shared/form-field";
 import { PageHeader } from "@/components/shared/page-header";
 import { VehicleIcon } from "@/components/shared/vehicle-icon";
-import { serverAddress, SIM_CARRIERS, trackerModel, TRACKER_MODELS } from "@/lib/trackers";
+import { serverAddress, SIM_CARRIERS, trackerHostKind, trackerModel, TRACKER_MODELS } from "@/lib/trackers";
 import { VEHICLE_TYPES } from "@/lib/vehicle-types";
 import { DEFAULT_SPEED_LIMIT_KMH } from "@/lib/activity";
 
@@ -349,6 +349,17 @@ function TrackerTab({ device, onSaved }: { device: DeviceDetail; onSaved: () => 
           </div>
           {address && <CopyButton text={address.replace(" (TCP)", "")} />}
         </div>
+        {trackerHostKind(device.serverHost) === "ip" && (
+          <p className="text-xs text-amber-700">
+            The server is set by IP. Best practice is a domain (e.g. trackers.yourcompany.com): if the server ever
+            changes, only its DNS record changes instead of sending an SMS to every tracker.
+          </p>
+        )}
+        {trackerHostKind(device.serverHost) === "invalid" && (
+          <p className="text-xs text-destructive">
+            TRACKER_SERVER_HOST ({device.serverHost}) isn&apos;t a valid domain or IP: trackers can&apos;t reach it.
+          </p>
+        )}
       </div>
 
       <div className={`${card} space-y-4`}>
