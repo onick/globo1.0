@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BellOff, Check, CheckCheck, Gauge, LogIn, LogOut, MapPin, type LucideIcon } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { BellOff, Check, CheckCheck, Gauge, LogIn, LogOut, MapPin, X, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -83,9 +84,10 @@ function detail(a: Alert) {
   return a.geofence?.name ?? "Deleted geofence";
 }
 
-async function fetchAlerts(type: string, unreadOnly: boolean): Promise<Alert[] | null> {
+async function fetchAlerts(type: string, unreadOnly: boolean, deviceId: string | null): Promise<Alert[] | null> {
   const query = new URLSearchParams();
   if (type !== ALL_TYPES) query.set("type", type);
+  if (deviceId) query.set("deviceId", deviceId);
   if (unreadOnly) query.set("unread", "1");
   const res = await fetch(`/api/alerts?${query}`);
   return res.ok ? res.json() : null;
@@ -97,13 +99,16 @@ export function AlertList() {
   const [type, setType] = useState(ALL_TYPES);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const canAcknowledge = useCan("alerts:acknowledge");
+  // ?deviceId= shows one vehicle's alerts, e.g. from its panel on the map
+  const deviceId = useSearchParams().get("deviceId");
+  const router = useRouter();
   // Bumped to reload right away (e.g. after marking alerts read)
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
     const refresh = () =>
-      fetchAlerts(type, unreadOnly).then((list) => {
+      fetchAlerts(type, unreadOnly, deviceId).then((list) => {
         if (active && list) setAlerts(list);
       });
     refresh();
@@ -112,7 +117,7 @@ export function AlertList() {
       active = false;
       clearInterval(timer);
     };
-  }, [type, unreadOnly, version]);
+  }, [type, unreadOnly, deviceId, version]);
 
   async function markRead(ids?: string[]) {
     const res = await fetch("/api/alerts/read", {
@@ -176,6 +181,14 @@ export function AlertList() {
               Unread only
             </Label>
           </div>
+          {deviceId && (
+            <Badge variant="info" className="gap-1.5 pr-1">
+              Vehicle: {alerts?.[0]?.device.name ?? "…"}
+              <button onClick={() => router.push("/alerts")} aria-label="Show all vehicles" className="rounded-full hover:bg-blue-100 p-0.5">
+                <X className="size-3" />
+              </button>
+            </Badge>
+          )}
           {alerts !== null && (
             <span className="ml-auto text-xs text-muted-foreground">
               {alerts.length} alert{alerts.length === 1 ? "" : "s"}

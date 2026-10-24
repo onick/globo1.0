@@ -7,7 +7,7 @@ import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
 const TYPES: AlertType[] = ["geofence_enter", "geofence_exit", "overspeed"];
 const MAX_LIMIT = 500;
 
-// GET /api/alerts?unread=1&type=&from=&to=&limit=  — newest first
+// GET /api/alerts?unread=1&type=&deviceId=&from=&to=&limit=  — newest first
 // GET /api/alerts?count=unread                      — { unread: n }, for the header bell
 export async function GET(request: Request) {
   const session = await auth();
@@ -26,6 +26,10 @@ export async function GET(request: Request) {
   }
 
   if (searchParams.get("unread") === "1") where.readAt = null;
+
+  // One vehicle's alerts (within the tenant's, so another client's id finds nothing)
+  const deviceId = searchParams.get("deviceId");
+  if (deviceId) where.deviceId = deviceId;
 
   const type = searchParams.get("type");
   if (type) {
