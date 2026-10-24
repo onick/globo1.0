@@ -44,6 +44,9 @@ export interface TrackedDevice extends Device {
   lastUpdate: string | null;
 }
 
+// Same tolerance Trakzee uses before calling a tracker inactive
+const OFFLINE_AFTER_MS = 60 * 60 * 1000;
+
 function computeTrackingStatus(
   device: Device,
   position: Position | null
@@ -54,9 +57,11 @@ function computeTrackingStatus(
   const fixAge = now - new Date(position.fixTime).getTime();
   const FIVE_MINUTES = 5 * 60 * 1000;
 
-  if (position.speed > 0) return "moving";
-  if (fixAge < FIVE_MINUTES) return "stopped";
-  return "idle";
+  // Silent for an hour: shown at its last position, but not as moving or stopped now
+  if (fixAge > OFFLINE_AFTER_MS) return "offline";
+  // Only a recent report says what the vehicle is doing now
+  if (fixAge >= FIVE_MINUTES) return "idle";
+  return position.speed > 0 ? "moving" : "stopped";
 }
 
 async function fetchPositions(): Promise<Map<number, Position> | null> {

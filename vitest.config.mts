@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // API tests against a database: npm run test:integration
+    exclude: ["src/**/*.int.test.ts", "node_modules/**"],
   },
 });

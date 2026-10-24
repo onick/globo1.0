@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { invalidateAlertCache } from "@/lib/alert-processor";
 import { MAX_RADIUS_M, MIN_RADIUS_M } from "@/lib/geofences";
 
@@ -10,9 +11,10 @@ export async function GET() {
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { tenantId, role } = session.user as Record<string, unknown>;
+  const where = tenantScope(session.user as Record<string, unknown>);
+  if (!where) return noClientResponse();
   const geofences = await db.geofence.findMany({
-    where: role === "super_admin" ? {} : { tenantId: tenantId as string },
+    where,
     include: { tenant: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
   });

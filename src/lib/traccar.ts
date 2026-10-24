@@ -4,6 +4,8 @@ interface TraccarDevice {
   uniqueId: string;
   status: string;
   lastUpdate: string;
+  // Id of the device's last position, if it ever reported
+  positionId?: number | null;
 }
 
 interface TraccarPosition {
@@ -104,6 +106,17 @@ class TraccarClient {
   async getPositions(deviceId?: number): Promise<TraccarPosition[]> {
     const query = deviceId ? `?deviceId=${deviceId}` : "";
     return this.request<TraccarPosition[]>(`/positions${query}`);
+  }
+
+  // Positions by id (e.g. each device's positionId: its last position), in batches so
+  // the query string stays short
+  async getPositionsById(ids: number[]): Promise<TraccarPosition[]> {
+    const positions: TraccarPosition[] = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      const query = new URLSearchParams(ids.slice(i, i + 200).map((id) => ["id", String(id)]));
+      positions.push(...(await this.request<TraccarPosition[]>(`/positions?${query}`)));
+    }
+    return positions;
   }
 
   // History: every position a device reported between two dates

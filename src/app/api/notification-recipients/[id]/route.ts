@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import type { AlertType } from "@prisma/client";
+import type { AlertType, NotificationRecipient } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { validateAlertTypes } from "@/lib/notify/validate";
 
-async function findOwned(id: string) {
+async function findOwned(id: string): Promise<{ error: NextResponse } | { recipient: NotificationRecipient }> {
   const session = await auth();
   if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 

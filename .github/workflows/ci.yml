@@ -16,7 +16,8 @@ jobs:
     timeout-minutes: 15
 
     services:
-      # Throwaway database for checking that prisma/migrations matches the schema
+      # Throwaway server: the shadow database checks that prisma/migrations matches the
+      # schema, and globo_test runs the API tests
       postgres:
         image: postgres:16-alpine
         env:
@@ -53,6 +54,13 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: Tenant isolation tests
+        run: |
+          PGPASSWORD=ci psql -h localhost -U ci -d shadow -c "CREATE DATABASE globo_test"
+          npm run test:integration
+        env:
+          TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/globo_test
 
       - name: Migrations match the schema
         run: npm run db:check

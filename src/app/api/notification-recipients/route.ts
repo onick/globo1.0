@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { AlertType, NotificationChannel } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { emailConfigured, whatsappConfigured } from "@/lib/notify/channels";
 import { validateRecipient } from "@/lib/notify/validate";
 
@@ -12,9 +13,10 @@ export async function GET() {
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { tenantId, role } = session.user as Record<string, unknown>;
+  const where = tenantScope(session.user as Record<string, unknown>);
+  if (!where) return noClientResponse();
   const recipients = await db.notificationRecipient.findMany({
-    where: role === "super_admin" ? {} : { tenantId: tenantId as string },
+    where,
     include: { tenant: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
