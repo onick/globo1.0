@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { AlertType, NotificationRecipient } from "@prisma/client";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import { forbiddenResponse } from "@/lib/tenant-scope";
 import { db } from "@/lib/db";
 import { validateAlertTypes } from "@/lib/notify/validate";
 
@@ -9,9 +11,7 @@ async function findOwned(id: string): Promise<{ error: NextResponse } | { recipi
   if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
   const { tenantId, role } = session.user as Record<string, unknown>;
-  if (role !== "admin" && role !== "super_admin") {
-    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-  }
+  if (!can(role, "notifications:manage")) return { error: forbiddenResponse() };
   const recipient = await db.notificationRecipient.findUnique({ where: { id } });
   if (!recipient) {
     return { error: NextResponse.json({ error: "Recipient not found" }, { status: 404 }) };

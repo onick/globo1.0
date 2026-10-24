@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
-import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
+import { forbiddenResponse, noClientResponse, tenantScope } from "@/lib/tenant-scope";
 
 // POST /api/alerts/read — { ids: string[] } marks those alerts read; {} marks all of them
 export async function POST(request: Request) {
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  if (!can((session.user as Record<string, unknown>).role, "alerts:acknowledge")) return forbiddenResponse();
   const scope = tenantScope(session.user as Record<string, unknown>);
   if (!scope) return noClientResponse();
   const body = await request.json().catch(() => ({}));

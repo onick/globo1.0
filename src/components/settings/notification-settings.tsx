@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { FormField } from "@/components/shared/form-field";
 import { PageHeader } from "@/components/shared/page-header";
+import { useCan } from "@/components/shared/role-provider";
 
 type Channel = "email" | "whatsapp";
 type AlertType = "geofence_enter" | "geofence_exit" | "overspeed";
@@ -42,7 +43,15 @@ const CHANNEL_LABELS: Record<Channel, string> = { email: "Email", whatsapp: "Wha
 
 const CHANNEL_ICONS = { email: Mail, whatsapp: MessageCircle };
 
-function TypeChecks({ value, onChange }: { value: AlertType[]; onChange: (types: AlertType[]) => void }) {
+function TypeChecks({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: AlertType[];
+  onChange: (types: AlertType[]) => void;
+  disabled?: boolean;
+}) {
   const id = useId();
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-2">
@@ -51,6 +60,7 @@ function TypeChecks({ value, onChange }: { value: AlertType[]; onChange: (types:
           <Checkbox
             id={`${id}-${t}`}
             checked={value.includes(t)}
+            disabled={disabled}
             onCheckedChange={(checked) => onChange(checked ? [...value, t] : value.filter((x) => x !== t))}
           />
           <Label htmlFor={`${id}-${t}`} className="text-sm font-normal">
@@ -71,6 +81,7 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
   const [address, setAddress] = useState("");
   const [types, setTypes] = useState<AlertType[]>(ALL_TYPES);
   const [error, setError] = useState<string | null>(null);
+  const canManage = useCan("notifications:manage");
 
   // Bumped to reload the list after adding a recipient
   const [version, setVersion] = useState(0);
@@ -158,62 +169,70 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
           </Alert>
         ))}
 
-      <div className="bg-card border rounded-xl p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-foreground">Add recipient</h2>
-        <div className="flex flex-wrap items-end gap-3">
-          {isSuperAdmin && (
-            <FormField label="Client" className="w-48">
-              <Select value={tenantId} onValueChange={setTenantId}>
+      {!canManage && (
+        <Alert>
+          <AlertDescription>Only your company&apos;s admins can change who gets alerts.</AlertDescription>
+        </Alert>
+      )}
+
+      {canManage && (
+        <div className="bg-card border rounded-xl p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-foreground">Add recipient</h2>
+          <div className="flex flex-wrap items-end gap-3">
+            {isSuperAdmin && (
+              <FormField label="Client" className="w-48">
+                <Select value={tenantId} onValueChange={setTenantId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose a client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tenants.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            )}
+            <FormField label="Channel" className="w-40">
+              <Select value={channel} onValueChange={(v) => setChannel(v as Channel)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Choose a client" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {tenants.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="email">
+                    <Mail /> Email
+                  </SelectItem>
+                  <SelectItem value="whatsapp">
+                    <MessageCircle /> WhatsApp
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </FormField>
-          )}
-          <FormField label="Channel" className="w-40">
-            <Select value={channel} onValueChange={(v) => setChannel(v as Channel)}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="email">
-                  <Mail /> Email
-                </SelectItem>
-                <SelectItem value="whatsapp">
-                  <MessageCircle /> WhatsApp
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <FormField
+              label={channel === "email" ? "Email address" : "WhatsApp number (with country code)"}
+              htmlFor="recipient-address"
+              className="flex-1 min-w-56"
+            >
+              <Input
+                id="recipient-address"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder={channel === "email" ? "ops@company.com" : "18095551234"}
+              />
+            </FormField>
+          </div>
+          <FormField label="Alerts to send">
+            <TypeChecks value={types} onChange={setTypes} />
           </FormField>
-          <FormField
-            label={channel === "email" ? "Email address" : "WhatsApp number (with country code)"}
-            htmlFor="recipient-address"
-            className="flex-1 min-w-56"
-          >
-            <Input
-              id="recipient-address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder={channel === "email" ? "ops@company.com" : "18095551234"}
-            />
-          </FormField>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button onClick={add} disabled={!address.trim() || !types.length}>
+            <Plus />
+            Add recipient
+          </Button>
         </div>
-        <FormField label="Alerts to send">
-          <TypeChecks value={types} onChange={setTypes} />
-        </FormField>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button onClick={add} disabled={!address.trim() || !types.length}>
-          <Plus />
-          Add recipient
-        </Button>
-      </div>
+      )}
 
       <div className="bg-card border rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b">
@@ -223,7 +242,9 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
         {recipients.length === 0 ? (
           <div className="py-12 text-center">
             <BellRing className="size-10 text-slate-300 mx-auto" />
-            <p className="text-sm text-muted-foreground mt-3">No recipients yet. Add one above.</p>
+            <p className="text-sm text-muted-foreground mt-3">
+              No recipients yet.{canManage ? " Add one above." : ""}
+            </p>
           </div>
         ) : (
           <ul className="divide-y">
@@ -249,27 +270,30 @@ export function NotificationSettings({ isSuperAdmin }: { isSuperAdmin: boolean }
                         <Switch
                           id={`active-${r.id}`}
                           checked={r.active}
+                          disabled={!canManage}
                           onCheckedChange={(active) => update(r, { active })}
                         />
                         <Label htmlFor={`active-${r.id}`} className="text-sm font-normal">
                           Active
                         </Label>
                       </div>
-                      <ConfirmDialog
-                        title="Remove recipient?"
-                        description={`${r.address} will stop receiving alerts.`}
-                        confirmLabel="Remove"
-                        onConfirm={() => remove(r)}
-                        trigger={
-                          <Button variant="ghost" size="icon-sm" aria-label={`Delete ${r.address}`} className="text-muted-foreground hover:text-destructive">
-                            <Trash2 />
-                          </Button>
-                        }
-                      />
+                      {canManage && (
+                        <ConfirmDialog
+                          title="Remove recipient?"
+                          description={`${r.address} will stop receiving alerts.`}
+                          confirmLabel="Remove"
+                          onConfirm={() => remove(r)}
+                          trigger={
+                            <Button variant="ghost" size="icon-sm" aria-label={`Delete ${r.address}`} className="text-muted-foreground hover:text-destructive">
+                              <Trash2 />
+                            </Button>
+                          }
+                        />
+                      )}
                     </div>
                   </div>
                   <div className="pl-11">
-                    <TypeChecks value={r.alertTypes} onChange={(alertTypes) => update(r, { alertTypes })} />
+                    <TypeChecks value={r.alertTypes} disabled={!canManage} onChange={(alertTypes) => update(r, { alertTypes })} />
                   </div>
                 </li>
               );

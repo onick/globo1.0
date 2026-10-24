@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import { forbiddenResponse } from "@/lib/tenant-scope";
 import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
 import { invalidateAlertCache } from "@/lib/alert-processor";
@@ -15,6 +17,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { tenantId, role } = session.user as Record<string, unknown>;
+  if (!can(role, "vehicles:delete")) return forbiddenResponse();
   const { id } = await params;
 
   const device = await db.device.findUnique({ where: { id } });
@@ -51,6 +54,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { tenantId, role } = session.user as Record<string, unknown>;
+  if (!can(role, "vehicles:edit")) return forbiddenResponse();
   const { id } = await params;
 
   const device = await db.device.findUnique({ where: { id } });

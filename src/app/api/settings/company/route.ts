@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import { forbiddenResponse } from "@/lib/tenant-scope";
 import { db } from "@/lib/db";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,7 +54,7 @@ export async function GET() {
 
   if (!tenant) return NextResponse.json({ error: "Company not found" }, { status: 404 });
 
-  return NextResponse.json({ ...tenant, canEdit: role === "admin" || role === "super_admin" });
+  return NextResponse.json({ ...tenant, canEdit: can(role, "company:edit") });
 }
 
 // PATCH /api/settings/company
@@ -75,9 +77,7 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  if (role !== "admin" && role !== "super_admin") {
-    return NextResponse.json({ error: "Only admins can update company settings" }, { status: 403 });
-  }
+  if (!can(role, "company:edit")) return forbiddenResponse();
 
   if (!tenantId) {
     return NextResponse.json({ error: "No company assigned" }, { status: 404 });

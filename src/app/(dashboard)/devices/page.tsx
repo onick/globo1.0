@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { DeviceTable, type Device } from "@/components/devices/device-table";
 import { DeviceForm } from "@/components/devices/device-form";
+import { useCan } from "@/components/shared/role-provider";
 import {
   Plus,
   X,
@@ -20,6 +21,9 @@ export default function DevicesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [search, setSearch] = useState("");
+  const canCreate = useCan("vehicles:create");
+  const canEdit = useCan("vehicles:edit");
+  const canDelete = useCan("vehicles:delete");
 
   const loadDevices = useCallback(async () => {
     try {
@@ -84,28 +88,30 @@ export default function DevicesPage() {
             Manage your GPS tracking devices
           </p>
         </div>
-        <button
-          onClick={() => {
-            if (showForm) {
-              handleCloseForm();
-            } else {
-              setEditingDevice(null);
-              setShowForm(true);
-            }
-          }}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium transition-all ${
-            showForm
-              ? "bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]"
-              : "bg-[#2563EB] text-white hover:bg-[#1D4ED8] shadow-sm"
-          }`}
-        >
-          {showForm ? (
-            <X className="w-4 h-4" />
-          ) : (
-            <Plus className="w-4 h-4" />
-          )}
-          {showForm ? "Cancel" : "Add Device"}
-        </button>
+        {canCreate && (
+          <button
+            onClick={() => {
+              if (showForm) {
+                handleCloseForm();
+              } else {
+                setEditingDevice(null);
+                setShowForm(true);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium transition-all ${
+              showForm
+                ? "bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]"
+                : "bg-[#2563EB] text-white hover:bg-[#1D4ED8] shadow-sm"
+            }`}
+          >
+            {showForm ? (
+              <X className="w-4 h-4" />
+            ) : (
+              <Plus className="w-4 h-4" />
+            )}
+            {showForm ? "Cancel" : "Add Device"}
+          </button>
+        )}
       </div>
 
       {/* ── Stats Row ── */}
@@ -161,8 +167,9 @@ export default function DevicesPage() {
       <DeviceTable
         devices={filtered}
         loading={loading}
-        onEdit={handleEdit}
+        onEdit={canEdit ? handleEdit : undefined}
         onDeleted={loadDevices}
+        canDelete={canDelete}
       />
     </div>
   );

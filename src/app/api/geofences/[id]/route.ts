@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import { forbiddenResponse } from "@/lib/tenant-scope";
 import { db } from "@/lib/db";
 import { invalidateAlertCache } from "@/lib/alert-processor";
 
@@ -13,9 +15,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { tenantId, role } = session.user as Record<string, unknown>;
-  if (role !== "admin" && role !== "super_admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!can(role, "geofences:manage")) return forbiddenResponse();
 
   const { id } = await params;
   const geofence = await db.geofence.findUnique({ where: { id } });
