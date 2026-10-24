@@ -73,4 +73,5 @@ Toda ruta nueva que lea o cambie datos de un cliente filtra con `tenantScope()` 
 - [docs/osrm.md](docs/osrm.md): rutas ajustadas a las calles.
 - [docs/alertas.md](docs/alertas.md): geocercas, motor de alertas y avisos por correo y WhatsApp.
 - [docs/rastreadores.md](docs/rastreadores.md): dominio y puertos del servidor, y cómo pasar un GPS de otra plataforma a Globo.
+- [docs/despliegue.md](docs/despliegue.md): servidor de producción con Docker detrás de Traefik, primera puesta en marcha y actualizaciones.
 - [docs/plans/](docs/plans/): diseño original del proyecto.
