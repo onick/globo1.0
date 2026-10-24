@@ -10,6 +10,8 @@ export const PERMISSIONS = {
   "vehicles:create": ["super_admin", "admin", "operator"],
   "vehicles:edit": ["super_admin", "admin", "operator"],
   "vehicles:delete": ["super_admin", "admin"],
+  // Tracker model, SIM, APN and swapping the IMEI: getting them wrong cuts the tracker off
+  "vehicles:configure": ["super_admin", "admin"],
   "geofences:manage": ["super_admin", "admin", "operator"],
   "alerts:acknowledge": ["super_admin", "admin", "operator"],
   // Settings

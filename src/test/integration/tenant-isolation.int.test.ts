@@ -5,6 +5,7 @@ import { call, seedTwoTenants, signInAs } from "./helpers";
 
 import * as devices from "@/app/api/devices/route";
 import * as device from "@/app/api/devices/[id]/route";
+import * as deviceImei from "@/app/api/devices/[id]/imei/route";
 import * as positions from "@/app/api/positions/route";
 import * as alerts from "@/app/api/alerts/route";
 import * as alertsRead from "@/app/api/alerts/read/route";
@@ -100,6 +101,14 @@ describe("a client's users only see their own client's data", () => {
 });
 
 describe("a client can't read another client's vehicle", () => {
+  it("detail page", async () => {
+    signInAs(w.a.admin);
+    expect((await call(device.GET, { params: { id: w.a.device.id } })).status).toBe(200);
+    const other = await call(device.GET, { params: { id: w.b.device.id } });
+    expect(other.status).toBe(404);
+    expectNoDataOf(other.body, w.b);
+  });
+
   it.each([
     ["history", history.GET, "/api/history"],
     ["activity report", activity.GET, "/api/reports/activity"],
@@ -121,6 +130,13 @@ describe("a client can't change another client's data", () => {
     expect((await call(device.PATCH, { method: "PATCH", params, body: { name: "Hacked" } })).status).toBe(403);
     expect((await call(device.DELETE, { method: "DELETE", params })).status).toBe(403);
     expect(await db.device.findUnique({ where: { id: w.b.device.id } })).toMatchObject({ name: w.b.device.name });
+  });
+
+  it("tracker settings and IMEI", async () => {
+    const params = { id: w.b.device.id };
+    expect((await call(device.PATCH, { method: "PATCH", params, body: { apn: "hacked" } })).status).toBe(403);
+    expect((await call(deviceImei.POST, { method: "POST", params, body: { imei: "999999999999999" } })).status).toBe(404);
+    expect(await db.device.findUnique({ where: { id: w.b.device.id } })).toMatchObject({ imei: w.b.device.imei, apn: null });
   });
 
   it("geofences", async () => {

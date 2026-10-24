@@ -6,6 +6,45 @@ import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
 import { invalidateAlertCache } from "@/lib/alert-processor";
 import { parseSpeedLimit } from "@/lib/speed-limit";
+import { parseDeviceConfig } from "@/lib/device-config";
+
+// GET /api/devices/:id — the device with its tracker and SIM settings and the trackers it
+// has had. The APN password only goes to roles that may configure the tracker.
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { tenantId, role } = session.user as Record<string, unknown>;
+  const { id } = await params;
+
+  const device = await db.device.findUnique({
+    where: { id },
+    include: {
+      tenant: { select: { name: true } },
+      imeiChanges: { orderBy: { changedAt: "desc" } },
+    },
+  });
+  if (!device || (role !== "super_admin" && device.tenantId !== tenantId)) {
+    return NextResponse.json({ error: "Device not found" }, { status: 404 });
+  }
+
+  const canConfigure = can(role, "vehicles:configure");
+  return NextResponse.json({
+    ...device,
+    apnPassword: canConfigure ? device.apnPassword : null,
+    // Public address of Globo's Traccar, where trackers must send their positions
+    serverHost: process.env.TRACKER_SERVER_HOST || null,
+    permissions: {
+      edit: can(role, "vehicles:edit"),
+      configure: canConfigure,
+      delete: can(role, "vehicles:delete"),
+    },
+  });
+}
 
 // DELETE /api/devices/:id
 export async function DELETE(
@@ -74,6 +113,13 @@ export async function PATCH(
   }
   const limit = speedLimit.value;
 
+  // Tracker and SIM settings need more than editing the vehicle
+  const config = parseDeviceConfig(data);
+  if ("error" in config) {
+    return NextResponse.json({ error: config.error }, { status: 400 });
+  }
+  if (Object.keys(config.data).length && !can(role, "vehicles:configure")) return forbiddenResponse();
+
   const updated = await db.device.update({
     where: { id },
     data: {
@@ -84,6 +130,7 @@ export async function PATCH(
       ...(data.driverPhone !== undefined && { driverPhone: data.driverPhone }),
       ...(data.status !== undefined && { status: data.status }),
       ...(limit !== undefined && { speedLimitKmh: limit }),
+      ...config.data,
     },
   });
   if (limit !== undefined) invalidateAlertCache();

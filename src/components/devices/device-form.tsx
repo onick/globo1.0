@@ -8,16 +8,9 @@ import {
   User,
   Save,
 } from "lucide-react";
+import { VEHICLE_TYPES as TYPES } from "@/lib/vehicle-types";
 
-const VEHICLE_TYPES = [
-  { value: "", label: "Select type..." },
-  { value: "truck", label: "Truck" },
-  { value: "van", label: "Van" },
-  { value: "car", label: "Car" },
-  { value: "pickup", label: "Pickup" },
-  { value: "motorcycle", label: "Motorcycle" },
-  { value: "bus", label: "Bus" },
-];
+const VEHICLE_TYPES = [{ value: "", label: "Select type..." }, ...TYPES];
 
 interface DeviceData {
   id: string;
