@@ -66,6 +66,17 @@ services:
       retries: 5
     restart: always
 
+  # Snaps history routes to the streets (OSRM_URL). Needs the map prepared first:
+  # scripts/osrm-prepare.sh — see docs/osrm.md
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    command: osrm-routed --algorithm mld --max-matching-size 100 /data/region.osrm
+    ports:
+      - "${OSRM_PORT:-5100}:5000"
+    volumes:
+      - ${OSRM_DATA_DIR:-./docker/osrm/data}:/data:ro
+    restart: always
+
 volumes:
   traccar-data:
   traccar-db-data:

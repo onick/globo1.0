@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
+import { invalidateAlertCache } from "@/lib/alert-processor";
+import { parseSpeedLimit } from "@/lib/speed-limit";
 
 // DELETE /api/devices/:id
 export async function DELETE(
@@ -61,6 +63,13 @@ export async function PATCH(
   }
 
   const data = await request.json();
+
+  const speedLimit = parseSpeedLimit(data.speedLimitKmh);
+  if ("error" in speedLimit) {
+    return NextResponse.json({ error: speedLimit.error }, { status: 400 });
+  }
+  const limit = speedLimit.value;
+
   const updated = await db.device.update({
     where: { id },
     data: {
@@ -70,8 +79,10 @@ export async function PATCH(
       ...(data.driverName !== undefined && { driverName: data.driverName }),
       ...(data.driverPhone !== undefined && { driverPhone: data.driverPhone }),
       ...(data.status !== undefined && { status: data.status }),
+      ...(limit !== undefined && { speedLimitKmh: limit }),
     },
   });
+  if (limit !== undefined) invalidateAlertCache();
 
   return NextResponse.json(updated);
 }

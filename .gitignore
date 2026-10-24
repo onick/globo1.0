@@ -40,6 +40,7 @@ yarn-error.log*
 
 # docker
 docker/nginx/certs/
+docker/osrm/data/
 
 # vercel
 .vercel

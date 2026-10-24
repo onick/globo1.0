@@ -57,6 +57,9 @@ interface HistoryPanelProps {
   segments: RouteSegment[];
   onStopClick: (stop: StopEvent) => void;
   onSegmentClick: (segment: RouteSegment) => void;
+  // Period to show first, e.g. when opened from a report or alert link
+  initialFrom?: Date;
+  initialTo?: Date;
 }
 
 /* ── Component ─────────────────────────────────────────── */
@@ -74,13 +77,15 @@ export function HistoryPanel({
   segments,
   onStopClick,
   onSegmentClick,
+  initialFrom,
+  initialTo,
 }: HistoryPanelProps) {
   const now = new Date();
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
 
-  const [fromValue, setFromValue] = useState(toLocalDatetime(todayStart));
-  const [toValue, setToValue] = useState(toLocalDatetime(now));
+  const [fromValue, setFromValue] = useState(toLocalDatetime(initialFrom ?? todayStart));
+  const [toValue, setToValue] = useState(toLocalDatetime(initialTo ?? now));
 
   // Only devices with traccarId
   const availableDevices = useMemo(

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseSpeedLimit } from "@/lib/speed-limit";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { traccar } from "@/lib/traccar";
@@ -31,7 +32,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { name, imei, vehiclePlate, vehicleType, driverName, driverPhone, tenantId: bodyTenantId } = await request.json();
+  const { name, imei, vehiclePlate, vehicleType, driverName, driverPhone, speedLimitKmh, tenantId: bodyTenantId } = await request.json();
+
+  const speedLimit = parseSpeedLimit(speedLimitKmh);
+  if ("error" in speedLimit) {
+    return NextResponse.json({ error: speedLimit.error }, { status: 400 });
+  }
 
   if (!name || !imei) {
     return NextResponse.json(
@@ -94,6 +100,7 @@ export async function POST(request: Request) {
       vehicleType: vehicleType || null,
       driverName: driverName || null,
       driverPhone: driverPhone || null,
+      speedLimitKmh: speedLimit.value ?? null,
     },
   });
 

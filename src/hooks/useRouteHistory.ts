@@ -1,25 +1,31 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import type { RoutePoint, RouteStop, RouteSummary } from "@/lib/history";
+import { haversineKm } from "@/lib/history";
+import { lengthKm, locateOnLine, pathBetween, type PathLocation } from "@/lib/route-path";
+
+// The history is computed on the server (/api/history): positions in km/h, stops with the
+// same rules as the reports and alerts, and the route snapped to the roads when OSRM is
+// available. This hook only shapes it into moving/stopped segments for the map and panel.
 
 /* ── Types ─────────────────────────────────────────────── */
 
 export interface HistoryPosition {
   latitude: number;
   longitude: number;
-  speed: number;
+  speed: number; // km/h
   course: number;
   fixTime: string;
   attributes: {
     ignition?: boolean;
-    motion?: boolean;
-    totalDistance?: number;
     [key: string]: unknown;
   };
 }
 
 export interface RouteSegment {
   type: "moving" | "stopped";
+  // Points to draw: along the roads when the route was matched
   positions: HistoryPosition[];
   startTime: string;
   endTime: string;
@@ -47,263 +53,131 @@ export interface TripSummary {
   stopCount: number;
 }
 
-/* ── Haversine distance ────────────────────────────────── */
-
-function haversineKm(
-  lat1: number, lon1: number,
-  lat2: number, lon2: number
-): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+interface HistoryResponse {
+  points: RoutePoint[];
+  stops: RouteStop[];
+  route: { snappedToRoads: boolean; segments: [number, number][][] } | null;
+  summary: RouteSummary;
 }
 
-/* ── GPS Noise Filter ──────────────────────────────────── */
+type LngLat = [number, number];
 
-/**
- * Douglas-Peucker line simplification algorithm.
- * Removes redundant points that don't contribute to the shape of the path.
- * epsilon = tolerance in km (smaller = more detail kept)
- */
-function perpendicularDistKm(
-  point: HistoryPosition,
-  lineStart: HistoryPosition,
-  lineEnd: HistoryPosition
-): number {
-  // Use cross-track distance on great circle (simplified for short distances)
-  const dAP = haversineKm(lineStart.latitude, lineStart.longitude, point.latitude, point.longitude);
-  const dAB = haversineKm(lineStart.latitude, lineStart.longitude, lineEnd.latitude, lineEnd.longitude);
-  if (dAB < 0.0001) return dAP; // start==end, just return distance to point
+const MOVING_COLOR = "#16A34A";
+const STOPPED_COLOR = "#F59E0B";
 
-  const bearingAB = Math.atan2(
-    Math.sin((lineEnd.longitude - lineStart.longitude) * Math.PI / 180) *
-      Math.cos(lineEnd.latitude * Math.PI / 180),
-    Math.cos(lineStart.latitude * Math.PI / 180) * Math.sin(lineEnd.latitude * Math.PI / 180) -
-      Math.sin(lineStart.latitude * Math.PI / 180) * Math.cos(lineEnd.latitude * Math.PI / 180) *
-      Math.cos((lineEnd.longitude - lineStart.longitude) * Math.PI / 180)
-  );
-  const bearingAP = Math.atan2(
-    Math.sin((point.longitude - lineStart.longitude) * Math.PI / 180) *
-      Math.cos(point.latitude * Math.PI / 180),
-    Math.cos(lineStart.latitude * Math.PI / 180) * Math.sin(point.latitude * Math.PI / 180) -
-      Math.sin(lineStart.latitude * Math.PI / 180) * Math.cos(point.latitude * Math.PI / 180) *
-      Math.cos((point.longitude - lineStart.longitude) * Math.PI / 180)
-  );
+const ms = (iso: string) => new Date(iso).getTime();
 
-  return Math.abs(Math.asin(Math.sin(dAP / 6371) * Math.sin(bearingAP - bearingAB)) * 6371);
-}
+/* ── Shaping ───────────────────────────────────────────── */
 
-function douglasPeucker(
-  points: HistoryPosition[],
-  epsilon: number
-): HistoryPosition[] {
-  if (points.length <= 2) return points;
-
-  // Find the point with maximum distance from the line (first→last)
-  let maxDist = 0;
-  let maxIdx = 0;
-  for (let i = 1; i < points.length - 1; i++) {
-    const dist = perpendicularDistKm(points[i], points[0], points[points.length - 1]);
-    if (dist > maxDist) {
-      maxDist = dist;
-      maxIdx = i;
-    }
-  }
-
-  // If max distance exceeds epsilon, recursively simplify both halves
-  if (maxDist > epsilon) {
-    const left = douglasPeucker(points.slice(0, maxIdx + 1), epsilon);
-    const right = douglasPeucker(points.slice(maxIdx), epsilon);
-    return [...left.slice(0, -1), ...right];
-  }
-
-  // Otherwise, discard all intermediate points (keep first & last)
-  return [points[0], points[points.length - 1]];
-}
-
-/**
- * Collapse stopped positions to centroid.
- * When the vehicle is parked, GPS drift creates noise — we replace all
- * those drifting points with a single stable centroid position.
- */
-function collapseStoppedPositions(positions: HistoryPosition[]): HistoryPosition[] {
-  if (positions.length <= 1) return positions;
-
-  const centroidLat = positions.reduce((s, p) => s + p.latitude, 0) / positions.length;
-  const centroidLon = positions.reduce((s, p) => s + p.longitude, 0) / positions.length;
-
-  // Keep first and last (for timeline continuity) but pin them to centroid
-  // Also keep a few intermediate points for playback smoothness
-  const result: HistoryPosition[] = [];
-  const step = Math.max(1, Math.floor(positions.length / 3)); // keep ~3 points
-
-  for (let i = 0; i < positions.length; i += step) {
-    result.push({
-      ...positions[i],
-      latitude: centroidLat,
-      longitude: centroidLon,
-    });
-  }
-
-  // Always include the last point
-  const last = positions[positions.length - 1];
-  if (result[result.length - 1].fixTime !== last.fixTime) {
-    result.push({
-      ...last,
-      latitude: centroidLat,
-      longitude: centroidLon,
-    });
-  }
-
-  return result;
-}
-
-// Simplification thresholds
-const SIMPLIFY_EPSILON_MOVING = 0.015; // 15 meters — removes GPS wobble but keeps real turns
-
-/* ── Processing ────────────────────────────────────────── */
-
-const STOP_SPEED = 2;          // km/h
-const MIN_STOP_DURATION = 60_000; // 1 minute
-
-function processPositions(positions: HistoryPosition[]) {
-  if (positions.length === 0) {
-    return { segments: [], stops: [], summary: null };
-  }
-
-  // 1. Classify each position
-  const classified = positions.map((p) => ({
-    ...p,
-    isMoving: p.speed >= STOP_SPEED,
+export function shapeHistory(data: HistoryResponse) {
+  const positions: HistoryPosition[] = data.points.map((p) => ({
+    latitude: p.snapped ? p.snapped[1] : p.latitude,
+    longitude: p.snapped ? p.snapped[0] : p.longitude,
+    speed: p.speedKmh,
+    course: p.course,
+    fixTime: p.time,
+    attributes: p.ignition === null ? {} : { ignition: p.ignition },
   }));
 
-  // 2. Build raw segments of consecutive same-type positions
-  const rawSegments: { type: "moving" | "stopped"; positions: typeof classified }[] = [];
-  let currentType: "moving" | "stopped" = classified[0].isMoving ? "moving" : "stopped";
-  let currentGroup = [classified[0]];
+  // Road-matched line and where each fix sits on it, to draw stretches along the streets
+  const line: LngLat[] | null = data.route ? data.route.segments.flat() : null;
+  const locations: PathLocation[] | null = line
+    ? locateOnLine(line, positions.map((p) => [p.longitude, p.latitude]))
+    : null;
 
-  for (let i = 1; i < classified.length; i++) {
-    const type = classified[i].isMoving ? "moving" : "stopped";
-    if (type === currentType) {
-      currentGroup.push(classified[i]);
-    } else {
-      rawSegments.push({ type: currentType, positions: currentGroup });
-      currentType = type;
-      currentGroup = [classified[i]];
+  const pathFor = (first: number, last: number): HistoryPosition[] => {
+    if (!line || !locations) return positions.slice(first, last + 1);
+    const out: HistoryPosition[] = [];
+    for (let i = first; i < last; i++) {
+      pathBetween(line, locations[i], locations[i + 1])
+        .slice(i === first ? 0 : 1)
+        .forEach(([longitude, latitude]) => out.push({ ...positions[i], latitude, longitude }));
     }
-  }
-  rawSegments.push({ type: currentType, positions: currentGroup });
+    if (first === last) out.push(positions[first]);
+    return out;
+  };
 
-  // 3. Merge brief stopped segments (< MIN_STOP_DURATION) into moving
-  const mergedSegments: typeof rawSegments = [];
-  for (const seg of rawSegments) {
-    if (seg.type === "stopped") {
-      const start = new Date(seg.positions[0].fixTime).getTime();
-      const end = new Date(seg.positions[seg.positions.length - 1].fixTime).getTime();
-      if (end - start < MIN_STOP_DURATION && mergedSegments.length > 0) {
-        // Merge into previous segment
-        const prev = mergedSegments[mergedSegments.length - 1];
-        prev.positions.push(...seg.positions);
-        continue;
-      }
-    }
-    mergedSegments.push(seg);
-  }
+  const distanceOf = (first: number, last: number, path: HistoryPosition[]) =>
+    line
+      ? lengthKm(path.map((p) => [p.longitude, p.latitude]))
+      : positions
+          .slice(first, last + 1)
+          .reduce((sum, p, i, run) => (i ? sum + haversineKm(run[i - 1], p) : 0), 0);
 
-  // 4. Build RouteSegments with stats + GPS noise filtering
-  const segments: RouteSegment[] = mergedSegments.map((seg) => {
-    const startTime = seg.positions[0].fixTime;
-    const endTime = seg.positions[seg.positions.length - 1].fixTime;
-    const duration = new Date(endTime).getTime() - new Date(startTime).getTime();
+  // Index range of each stop; moving segments are what lies between them
+  const indexOf = (time: string, fromStart: boolean) => {
+    const t = ms(time);
+    if (fromStart) return Math.max(0, data.points.findIndex((p) => ms(p.time) >= t));
+    let i = data.points.length - 1;
+    while (i > 0 && ms(data.points[i].time) > t) i--;
+    return i;
+  };
 
-    // Calculate stats on RAW positions (before filtering) for accuracy
-    let distance = 0;
-    let maxSpeed = 0;
-    for (let i = 1; i < seg.positions.length; i++) {
-      const prev = seg.positions[i - 1];
-      const curr = seg.positions[i];
-      distance += haversineKm(prev.latitude, prev.longitude, curr.latitude, curr.longitude);
-      if (curr.speed > maxSpeed) maxSpeed = curr.speed;
-    }
-
-    const avgSpeed = duration > 0 ? (distance / (duration / 3600000)) : 0;
-
-    // Apply GPS noise filter to positions for DISPLAY
-    let cleanPositions: HistoryPosition[];
-    if (seg.type === "stopped") {
-      // Collapse all drifting stopped positions to centroid
-      cleanPositions = collapseStoppedPositions(seg.positions);
-    } else {
-      // Simplify moving path with Douglas-Peucker
-      cleanPositions = douglasPeucker(seg.positions, SIMPLIFY_EPSILON_MOVING);
-    }
-
-    return {
-      type: seg.type,
-      positions: cleanPositions,
-      startTime,
-      endTime,
+  const segments: RouteSegment[] = [];
+  const moving = (first: number, last: number) => {
+    if (last <= first) return;
+    const path = pathFor(first, last);
+    const distance = distanceOf(first, last, path);
+    const hours = (ms(positions[last].fixTime) - ms(positions[first].fixTime)) / 3_600_000;
+    segments.push({
+      type: "moving",
+      positions: path,
+      startTime: positions[first].fixTime,
+      endTime: positions[last].fixTime,
       distance,
-      maxSpeed,
-      avgSpeed: seg.type === "moving" ? avgSpeed : 0,
-      color: seg.type === "moving" ? "#16A34A" : "#F59E0B",
-    };
-  });
-
-  // 5. Extract stops
-  const stops: StopEvent[] = segments
-    .filter((s) => s.type === "stopped")
-    .map((s) => {
-      // Use centroid of stopped positions
-      const lats = s.positions.map((p) => p.latitude);
-      const lngs = s.positions.map((p) => p.longitude);
-      return {
-        latitude: lats.reduce((a, b) => a + b, 0) / lats.length,
-        longitude: lngs.reduce((a, b) => a + b, 0) / lngs.length,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        duration: new Date(s.endTime).getTime() - new Date(s.startTime).getTime(),
-      };
+      maxSpeed: Math.max(...positions.slice(first, last + 1).map((p) => p.speed)),
+      avgSpeed: hours > 0 ? distance / hours : 0,
+      color: MOVING_COLOR,
     });
+  };
 
-  // 6. Summary
-  const totalDuration =
-    new Date(positions[positions.length - 1].fixTime).getTime() -
-    new Date(positions[0].fixTime).getTime();
+  let cursor = 0;
+  for (const stop of data.stops) {
+    const first = indexOf(stop.startTime, true);
+    const last = indexOf(stop.endTime, false);
+    moving(cursor, first);
+    segments.push({
+      type: "stopped",
+      // A parked vehicle's fixes drift; draw it where the stop is
+      positions: positions.slice(first, last + 1).map((p) => ({
+        ...p,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+      })),
+      startTime: stop.startTime,
+      endTime: stop.endTime,
+      distance: 0,
+      maxSpeed: Math.max(...positions.slice(first, last + 1).map((p) => p.speed)),
+      avgSpeed: 0,
+      color: STOPPED_COLOR,
+    });
+    cursor = last;
+  }
+  moving(cursor, positions.length - 1);
 
-  const movingSegs = segments.filter((s) => s.type === "moving");
-  const stoppedSegs = segments.filter((s) => s.type === "stopped");
+  const stops: StopEvent[] = data.stops.map((s) => ({
+    latitude: s.latitude,
+    longitude: s.longitude,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    duration: ms(s.endTime) - ms(s.startTime),
+  }));
 
-  const movingDuration = movingSegs.reduce(
-    (acc, s) => acc + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()),
-    0
-  );
-  const stoppedDuration = stoppedSegs.reduce(
-    (acc, s) => acc + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()),
-    0
-  );
-
-  const totalDistance = movingSegs.reduce((acc, s) => acc + s.distance, 0);
-  const maxSpeed = Math.max(0, ...segments.map((s) => s.maxSpeed));
-  const avgSpeed = movingDuration > 0 ? (totalDistance / (movingDuration / 3600000)) : 0;
+  const span = (s: RouteSegment) => ms(s.endTime) - ms(s.startTime);
+  const movingDuration = segments.filter((s) => s.type === "moving").reduce((a, s) => a + span(s), 0);
 
   const summary: TripSummary = {
-    totalDistance,
-    totalDuration,
+    totalDistance: data.summary.distanceKm,
+    totalDuration:
+      positions.length > 1 ? ms(positions[positions.length - 1].fixTime) - ms(positions[0].fixTime) : 0,
     movingDuration,
-    stoppedDuration,
-    maxSpeed,
-    avgSpeed,
+    stoppedDuration: stops.reduce((a, s) => a + s.duration, 0),
+    maxSpeed: data.summary.maxSpeedKmh,
+    avgSpeed: movingDuration > 0 ? data.summary.distanceKm / (movingDuration / 3_600_000) : 0,
     stopCount: stops.length,
   };
 
-  return { segments, stops, summary };
+  return { positions, segments, stops, summary, baseLine: line };
 }
 
 /* ── Hook ──────────────────────────────────────────────── */
@@ -313,53 +187,54 @@ export function useRouteHistory() {
   const [segments, setSegments] = useState<RouteSegment[]>([]);
   const [stops, setStops] = useState<StopEvent[]>([]);
   const [summary, setSummary] = useState<TripSummary | null>(null);
+  // Whole route along the roads; null when it couldn't be matched (GPS line instead)
+  const [baseLine, setBaseLine] = useState<LngLat[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const reset = useCallback(() => {
+    setPositions([]);
+    setSegments([]);
+    setStops([]);
+    setSummary(null);
+    setBaseLine(null);
+  }, []);
 
   const fetchHistory = useCallback(async (deviceId: string, from: Date, to: Date) => {
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch(
-        `/api/positions/history?deviceId=${deviceId}&from=${from.toISOString()}&to=${to.toISOString()}`
-      );
+      const query = new URLSearchParams({ deviceId, from: from.toISOString(), to: to.toISOString() });
+      const res = await fetch(`/api/history?${query}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const data: HistoryPosition[] = await res.json();
-
-      if (data.length === 0) {
-        setPositions([]);
-        setSegments([]);
-        setStops([]);
-        setSummary(null);
+      if (data.points.length === 0) {
+        reset();
         setError("No movement data found for this period");
         return;
       }
 
-      const result = processPositions(data);
-      setPositions(data);
-      setSegments(result.segments);
-      setStops(result.stops);
-      setSummary(result.summary);
+      const shaped = shapeHistory(data);
+      setPositions(shaped.positions);
+      setSegments(shaped.segments);
+      setStops(shaped.stops);
+      setSummary(shaped.summary);
+      setBaseLine(shaped.baseLine);
     } catch (err) {
+      reset();
       setError(err instanceof Error ? err.message : "Failed to load history");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reset]);
 
   const clear = useCallback(() => {
-    setPositions([]);
-    setSegments([]);
-    setStops([]);
-    setSummary(null);
+    reset();
     setLoading(false);
     setError(null);
-  }, []);
+  }, [reset]);
 
-  return { positions, segments, stops, summary, loading, error, fetchHistory, clear };
+  return { positions, segments, stops, summary, baseLine, loading, error, fetchHistory, clear };
 }

@@ -26,6 +26,23 @@ enum DeviceStatus {
   disabled
 }
 
+enum AlertType {
+  geofence_enter
+  geofence_exit
+  overspeed
+}
+
+enum NotificationChannel {
+  email
+  whatsapp
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  failed
+}
+
 enum SubscriptionStatus {
   active
   past_due
@@ -45,6 +62,9 @@ model Tenant {
   users         User[]
   devices       Device[]
   subscriptions Subscription[]
+  geofences     Geofence[]
+  alerts        Alert[]
+  recipients    NotificationRecipient[]
 
   @@map("tenants")
 }
@@ -66,33 +86,123 @@ model User {
 }
 
 model Device {
-  id           String       @id @default(cuid())
-  tenantId     String       @map("tenant_id")
-  traccarId    Int?         @unique @map("traccar_id")
-  name         String
-  imei         String       @unique
-  status       DeviceStatus @default(active)
-  vehiclePlate String?      @map("vehicle_plate")
-  vehicleType  String?      @map("vehicle_type")
-  driverName   String?      @map("driver_name")
-  driverPhone  String?      @map("driver_phone")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  id            String       @id @default(cuid())
+  tenantId      String       @map("tenant_id")
+  traccarId     Int?         @unique @map("traccar_id")
+  name          String
+  imei          String       @unique
+  status        DeviceStatus @default(active)
+  vehiclePlate  String?      @map("vehicle_plate")
+  vehicleType   String?      @map("vehicle_type")
+  driverName    String?      @map("driver_name")
+  driverPhone   String?      @map("driver_phone")
+  // Overspeed alerts above this; null uses the default (80 km/h)
+  speedLimitKmh Int?         @map("speed_limit_kmh")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alerts Alert[]
 
   @@index([tenantId])
   @@map("devices")
 }
 
+// Circular geofence; applies to every device of its tenant
+model Geofence {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  latitude  Float
+  longitude Float
+  radiusM   Int      @map("radius_m")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alerts Alert[]
+
+  @@index([tenantId])
+  @@map("geofences")
+}
+
+// Raised by the alert engine as positions arrive from Traccar
+model Alert {
+  id         String    @id @default(cuid())
+  tenantId   String    @map("tenant_id")
+  deviceId   String    @map("device_id")
+  type       AlertType
+  geofenceId String?   @map("geofence_id")
+  // Fix time of the position that raised it
+  time       DateTime
+  latitude   Float
+  longitude  Float
+  speedKmh   Float     @map("speed_kmh")
+  limitKmh   Int?      @map("limit_kmh")
+  readAt     DateTime? @map("read_at")
+  // device + type + geofence + time: the same position never raises the same alert twice
+  dedupKey   String    @unique @map("dedup_key")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  device        Device         @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  geofence      Geofence?      @relation(fields: [geofenceId], references: [id], onDelete: SetNull)
+  notifications Notification[]
+
+  @@index([tenantId, time])
+  @@map("alerts")
+}
+
+// Who gets alerts outside the app, per tenant
+model NotificationRecipient {
+  id         String              @id @default(cuid())
+  tenantId   String              @map("tenant_id")
+  channel    NotificationChannel
+  // Email address, or WhatsApp number in international format without "+" (e.g. 18095551234)
+  address    String
+  // Alert types this recipient wants
+  alertTypes AlertType[]         @map("alert_types")
+  active     Boolean             @default(true)
+  createdAt  DateTime            @default(now()) @map("created_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notifications Notification[]
+
+  @@unique([tenantId, channel, address])
+  @@map("notification_recipients")
+}
+
+// Outbox: one row per alert and recipient, written with the alert and sent by the
+// dispatcher, so a crash between the two never loses a notification
+model Notification {
+  id            String              @id @default(cuid())
+  alertId       String              @map("alert_id")
+  recipientId   String?             @map("recipient_id")
+  channel       NotificationChannel
+  // Copy of the recipient address when it was queued
+  address       String
+  status        NotificationStatus  @default(pending)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now()) @map("next_attempt_at")
+  lastError     String?             @map("last_error")
+  sentAt        DateTime?           @map("sent_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  alert     Alert                  @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  recipient NotificationRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+
+  @@unique([alertId, recipientId])
+  @@index([status, nextAttemptAt])
+  @@map("notifications")
+}
+
 model Plan {
-  id         String  @id @default(cuid())
-  name       String  @unique
-  maxDevices Int     @map("max_devices")
-  price      Int     // cents
-  interval   String  @default("monthly")
-  features   Json    @default("[]")
-  active     Boolean @default(true)
+  id         String   @id @default(cuid())
+  name       String   @unique
+  maxDevices Int      @map("max_devices")
+  price      Int // cents
+  interval   String   @default("monthly")
+  features   Json     @default("[]")
+  active     Boolean  @default(true)
   createdAt  DateTime @default(now()) @map("created_at")
 
   subscriptions Subscription[]

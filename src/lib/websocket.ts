@@ -1,9 +1,13 @@
 import WebSocket from "ws";
 import { redis, redisPub } from "./redis";
 import { db } from "./db";
+import { processAlerts } from "./alert-processor";
+import { knotsToKmh } from "./history";
 
 let traccarWs: WebSocket | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
+// Alert batches run one after another so a device's state is never updated concurrently
+let alertQueue: Promise<void> = Promise.resolve();
 
 interface TraccarMessage {
   positions?: Array<{
@@ -60,7 +64,11 @@ function connect() {
         try {
           const message: TraccarMessage = JSON.parse(data.toString());
           if (message.positions) {
-            await handlePositions(message.positions);
+            const positions = message.positions;
+            await handlePositions(positions);
+            alertQueue = alertQueue
+              .then(() => processAlerts(positions))
+              .catch((err) => console.error("[WS] Alert processing error:", err));
           }
         } catch (err) {
           console.error("[WS] Parse error:", err);
@@ -94,7 +102,8 @@ async function handlePositions(
       deviceId: pos.deviceId,
       latitude: pos.latitude,
       longitude: pos.longitude,
-      speed: pos.speed,
+      // Traccar sends knots; the live map works in km/h
+      speed: knotsToKmh(pos.speed),
       course: pos.course,
       fixTime: pos.fixTime,
       attributes: pos.attributes,
@@ -113,7 +122,11 @@ async function handlePositions(
   await pipeline.exec();
 }
 
+// Started once per server process from instrumentation.ts; the guard covers dev reloads
 export function startTraccarBridge() {
+  const g = globalThis as unknown as { traccarBridgeStarted?: boolean };
+  if (g.traccarBridgeStarted) return;
+  g.traccarBridgeStarted = true;
   connect();
 }
 
