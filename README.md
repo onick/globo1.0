@@ -37,6 +37,7 @@ El simulador publica en Traccar por el protocolo OsmAnd, igual que un rastreador
 | `npm run typecheck` | Comprobación de tipos |
 | `npm run lint` | ESLint |
 | `npm test` | Pruebas unitarias (Vitest) |
+| `npm run test:integration` | Pruebas de la API contra Postgres, entre ellas el aislamiento entre clientes (necesita `TEST_DATABASE_URL`) |
 | `npm run build` | Compilación de producción |
 | `npm run db:migrate` | Crea una migración a partir de cambios en `prisma/schema.prisma` |
 | `npm run db:deploy` | Aplica las migraciones pendientes (producción) |
@@ -57,6 +58,15 @@ En producción solo se usa `npm run db:deploy`. No usar `prisma db push` fuera d
 Cada pull request y cada push a `main` pasan por GitHub Actions (`.github/workflows/ci.yml`): tipos, lint, pruebas, migraciones al día con el esquema y compilación. Un PR con cualquiera de esos pasos en rojo no debería fusionarse.
 
 Las pruebas están junto al código que prueban (`src/**/*.test.ts`). La lógica de historial, reportes, alertas y avisos está en funciones puras de `src/lib/`, que es donde se prueba.
+
+Las pruebas de integración (`src/**/*.int.test.ts`) llaman a las rutas de la API con una base de datos real y comprueban que **ningún usuario ve ni cambia datos de otro cliente**: listados, historial, reportes, cambios, borrados y altas que nombran a otro cliente, el panel de administración y usuarios sin cliente asignado. Usan una base de datos propia cuyo nombre debe terminar en `test`, porque vacían sus tablas:
+
+```bash
+createdb globo_test
+TEST_DATABASE_URL=postgresql://usuario:clave@localhost:5432/globo_test npm run test:integration
+```
+
+Toda ruta nueva que lea o cambie datos de un cliente filtra con `tenantScope()` (`src/lib/tenant-scope.ts`) y se añade a esas pruebas.
 
 ## Documentación
 

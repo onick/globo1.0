@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { parseSpeedLimit } from "@/lib/speed-limit";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { traccar } from "@/lib/traccar";
 
 // GET /api/devices — list devices for current tenant
@@ -10,9 +11,8 @@ export async function GET() {
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { tenantId, role } = session.user as Record<string, unknown>;
-
-  const where = role === "super_admin" ? {} : { tenantId: tenantId as string };
+  const where = tenantScope(session.user as Record<string, unknown>);
+  if (!where) return noClientResponse();
   const devices = await db.device.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -46,8 +46,9 @@ export async function POST(request: Request) {
     );
   }
 
-  // Resolve tenant: use session tenantId, or body tenantId for super_admin
-  const resolvedTenantId = (tenantId as string) || (bodyTenantId as string);
+  // Client users add to their own client; only super admins may name one
+  if (role !== "super_admin" && !tenantId) return noClientResponse();
+  const resolvedTenantId = role === "super_admin" ? (bodyTenantId as string) || (tenantId as string) : (tenantId as string);
 
   // super_admin without tenant: find or create a default one
   let finalTenantId = resolvedTenantId;

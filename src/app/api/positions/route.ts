@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { redis } from "@/lib/redis";
 import { db } from "@/lib/db";
+import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { lastKnownPositions } from "@/lib/last-positions";
 
 // GET /api/positions — current position of each of the tenant's devices: live when it
@@ -11,13 +12,9 @@ export async function GET() {
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { tenantId, role } = session.user as Record<string, unknown>;
-
-  // Get tenant's devices
-  const where =
-    role === "super_admin"
-      ? { traccarId: { not: null as unknown as undefined } }
-      : { tenantId: tenantId as string, traccarId: { not: null as unknown as undefined } };
+  const scope = tenantScope(session.user as Record<string, unknown>);
+  if (!scope) return noClientResponse();
+  const where = { ...scope, traccarId: { not: null } };
 
   const devices = await db.device.findMany({
     where,

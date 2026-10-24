@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { AlertType, Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
 
 const TYPES: AlertType[] = ["geofence_enter", "geofence_exit", "overspeed"];
 const MAX_LIMIT = 500;
@@ -13,10 +14,11 @@ export async function GET(request: Request) {
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { tenantId, role } = session.user as Record<string, unknown>;
+  const scope = tenantScope(session.user as Record<string, unknown>);
+  if (!scope) return noClientResponse();
   const { searchParams } = new URL(request.url);
 
-  const where: Prisma.AlertWhereInput = role === "super_admin" ? {} : { tenantId: tenantId as string };
+  const where: Prisma.AlertWhereInput = { ...scope };
 
   if (searchParams.get("count") === "unread") {
     const unread = await db.alert.count({ where: { ...where, readAt: null } });
