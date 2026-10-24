@@ -7,6 +7,9 @@ import * as devices from "@/app/api/devices/route";
 import * as device from "@/app/api/devices/[id]/route";
 import * as deviceImei from "@/app/api/devices/[id]/imei/route";
 import * as positions from "@/app/api/positions/route";
+import * as trails from "@/app/api/positions/trails/route";
+import { traccar } from "@/lib/traccar";
+import type { Mock } from "vitest";
 import * as alerts from "@/app/api/alerts/route";
 import * as alertsRead from "@/app/api/alerts/read/route";
 import * as geofences from "@/app/api/geofences/route";
@@ -65,6 +68,7 @@ const today = () => {
 const LISTS = [
   ["GET /api/devices", () => call(devices.GET, { path: "/api/devices" })],
   ["GET /api/positions", () => call(positions.GET, { path: "/api/positions" })],
+  ["GET /api/positions/trails", () => call(trails.GET, { path: "/api/positions/trails" })],
   ["GET /api/alerts", () => call(alerts.GET, { path: "/api/alerts" })],
   ["GET /api/geofences", () => call(geofences.GET, { path: "/api/geofences" })],
   ["GET /api/notification-recipients", () => call(recipients.GET, { path: "/api/notification-recipients" })],
@@ -97,6 +101,25 @@ describe("a client's users only see their own client's data", () => {
     const summary = (await call(dashboard.GET)).body;
     expect(summary.vehicles).toMatchObject({ total: 1, reporting: 1 });
     expect(summary.alertsToday).toMatchObject({ total: 1, unread: 1 });
+  });
+});
+
+describe("live trails", () => {
+  it("only include the client's own reporting vehicles", async () => {
+    // Trails are cached for a few seconds: start from none
+    await redis.del(`trail:${w.a.device.traccarId}`, `trail:${w.b.device.traccarId}`);
+    // Every vehicle has driven a little in the last minutes
+    (traccar.getRoute as unknown as Mock).mockResolvedValue([
+      { latitude: 18.48, longitude: -69.93, speed: 10, course: 0, fixTime: new Date(Date.now() - 60_000).toISOString(), attributes: {} },
+      { latitude: 18.481, longitude: -69.93, speed: 10, course: 0, fixTime: new Date().toISOString(), attributes: {} },
+    ]);
+    try {
+      signInAs(w.a.viewer);
+      const { body } = await call(trails.GET, { path: "/api/positions/trails" });
+      expect(Object.keys(body.trails)).toEqual([String(w.a.device.traccarId)]);
+    } finally {
+      (traccar.getRoute as unknown as Mock).mockResolvedValue([]);
+    }
   });
 });
 
