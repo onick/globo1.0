@@ -4,7 +4,7 @@ import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { forbiddenResponse, noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { invalidateAlertCache } from "@/lib/alert-processor";
-import { MAX_RADIUS_M, MIN_RADIUS_M } from "@/lib/geofences";
+import { MAX_RADIUS_M, MIN_RADIUS_M, polygonCenter, validatePolygon } from "@/lib/geofences";
 
 // GET /api/geofences — geofences of the current tenant (all of them for super admins)
 export async function GET() {
@@ -23,7 +23,8 @@ export async function GET() {
   return NextResponse.json(geofences);
 }
 
-// POST /api/geofences — { name, latitude, longitude, radiusM, tenantId (super admins only) }
+// POST /api/geofences — circle: { name, latitude, longitude, radiusM }; drawn polygon:
+// { name, shape: "polygon", polygon: [[lng, lat], …] }; tenantId too for super admins
 export async function POST(request: Request) {
   const session = await auth();
   if (!session)
@@ -43,6 +44,16 @@ export async function POST(request: Request) {
   }
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  }
+
+  if (body.shape === "polygon") {
+    const checked = validatePolygon(body.polygon);
+    if ("error" in checked) return NextResponse.json({ error: checked.error }, { status: 400 });
+    const geofence = await db.geofence.create({
+      data: { tenantId: targetTenant as string, name, shape: "polygon", polygon: checked.ring, ...polygonCenter(checked.ring) },
+    });
+    invalidateAlertCache();
+    return NextResponse.json(geofence, { status: 201 });
   }
   if (
     typeof latitude !== "number" || latitude < -90 || latitude > 90 ||

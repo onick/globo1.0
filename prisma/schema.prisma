@@ -135,14 +135,24 @@ model DeviceImeiChange {
   @@map("device_imei_changes")
 }
 
+enum GeofenceShape {
+  circle
+  polygon
+}
+
 model Geofence {
-  id        String   @id @default(cuid())
-  tenantId  String   @map("tenant_id")
+  id        String        @id @default(cuid())
+  tenantId  String        @map("tenant_id")
   name      String
+  shape     GeofenceShape @default(circle)
+  // Circles: center and radius. Drawn polygons: the center of their points and a radius
+  // that holds the whole polygon, for the list and labels
   latitude  Float
   longitude Float
-  radiusM   Int      @map("radius_m")
-  createdAt DateTime @default(now()) @map("created_at")
+  radiusM   Int           @map("radius_m")
+  // Drawn polygons only: [[longitude, latitude], …], not closed
+  polygon   Json?
+  createdAt DateTime      @default(now()) @map("created_at")
 
   tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   alerts Alert[]

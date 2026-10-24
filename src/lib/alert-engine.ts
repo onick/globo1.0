@@ -3,12 +3,21 @@
 // same logic.
 
 import { haversineKm } from "@/lib/history";
+import { distanceToRingM, pointInPolygon, type LngLat } from "@/lib/geofences";
 
-export interface EngineGeofence {
-  id: string;
-  latitude: number;
-  longitude: number;
-  radiusM: number;
+export type EngineGeofence =
+  | { id: string; shape?: "circle"; latitude: number; longitude: number; radiusM: number }
+  | { id: string; shape: "polygon"; polygon: LngLat[] };
+
+// How far the position is from the geofence's edge, in meters: negative inside, positive
+// outside, for circles and drawn polygons alike
+export function edgeDistanceM(g: EngineGeofence, position: { latitude: number; longitude: number }): number {
+  if (g.shape === "polygon") {
+    const point: LngLat = [position.longitude, position.latitude];
+    const d = distanceToRingM(point, g.polygon);
+    return pointInPolygon(point, g.polygon) ? -d : d;
+  }
+  return haversineKm(position, g) * 1000 - g.radiusM;
 }
 
 export interface EnginePosition {
@@ -40,7 +49,7 @@ export interface EngineAlert {
 }
 
 // GPS jitter around a geofence edge would flap enter/exit: the vehicle enters at the
-// radius but only exits once it is this far beyond it.
+// edge but only exits once it is this far beyond it.
 export const GEOFENCE_EXIT_MARGIN_M = 25;
 // Same for speeding: a new overspeed alert needs the speed to drop this far below the
 // limit first, so hovering around the limit raises one alert, not one per fix.
@@ -57,7 +66,7 @@ export function evaluatePosition(
     return { state, alerts: [], skipped: true };
   }
 
-  const distanceM = (g: EngineGeofence) => haversineKm(position, g) * 1000;
+  const edgeM = (g: EngineGeofence) => edgeDistanceM(g, position);
   const alert = (type: EngineAlert["type"], geofenceId: string | null): EngineAlert => ({
     type,
     geofenceId,
@@ -73,7 +82,7 @@ export function evaluatePosition(
     return {
       state: {
         lastFixTime: position.time,
-        inside: geofences.filter((g) => distanceM(g) <= g.radiusM).map((g) => g.id),
+        inside: geofences.filter((g) => edgeM(g) <= 0).map((g) => g.id),
         known: geofences.map((g) => g.id),
         speeding: position.speedKmh > limitKmh,
       },
@@ -86,14 +95,14 @@ export function evaluatePosition(
   const inside: string[] = [];
 
   for (const g of geofences) {
-    const d = distanceM(g);
+    const d = edgeM(g);
     const wasInside = state.inside.includes(g.id);
     const isNew = !state.known.includes(g.id);
 
     if (wasInside) {
-      if (d <= g.radiusM + GEOFENCE_EXIT_MARGIN_M) inside.push(g.id);
+      if (d <= GEOFENCE_EXIT_MARGIN_M) inside.push(g.id);
       else alerts.push(alert("geofence_exit", g.id));
-    } else if (d <= g.radiusM) {
+    } else if (d <= 0) {
       inside.push(g.id);
       if (!isNew) alerts.push(alert("geofence_enter", g.id));
     }

@@ -88,3 +88,53 @@ describe("fix order", () => {
     expect(same.skipped).toBe(true);
   });
 });
+
+describe("drawn (polygon) geofences", () => {
+  // A yard from 0 to 200 m east of the depot's center, 18.479°–18.481° N
+  const YARD: EngineGeofence = {
+    id: "yard",
+    shape: "polygon",
+    polygon: [
+      [lonAt(0), 18.479],
+      [lonAt(200), 18.479],
+      [lonAt(200), 18.481],
+      [lonAt(0), 18.481],
+    ],
+  };
+
+  it("alerts on entering and leaving, with the same margin at the edge", () => {
+    // In at 50 m; 210 m is 10 m past the edge, still inside the margin; out at 260 m
+    expect(drive([[-100], [50], [150], [210], [260]], [YARD]).alerts).toEqual(["geofence_enter:yard", "geofence_exit:yard"]);
+  });
+
+  it("follows the drawn shape, not a circle around it", () => {
+    // An L: the top-right quarter is missing
+    const L: EngineGeofence = {
+      id: "l",
+      shape: "polygon",
+      polygon: [
+        [lonAt(0), 18.479],
+        [lonAt(200), 18.479],
+        [lonAt(200), 18.48],
+        [lonAt(100), 18.48],
+        [lonAt(100), 18.481],
+        [lonAt(0), 18.481],
+      ],
+    };
+    // Driving along 18.4805 (the upper half): inside west of 100 m, in the notch east of it
+    let state: DeviceAlertState | null = null;
+    const alerts: string[] = [];
+    for (const m of [-100, 50, 160]) {
+      const r = evaluatePosition(
+        state,
+        { time: new Date(Date.UTC(2026, 9, 24, 13, 0, clock++ * 10)).toISOString(), latitude: 18.4805, longitude: lonAt(m), speedKmh: 30 },
+        [L],
+        80
+      );
+      state = r.state;
+      alerts.push(...r.alerts.map((a) => a.type));
+    }
+    expect(alerts).toEqual(["geofence_enter", "geofence_exit"]);
+  });
+});
+
