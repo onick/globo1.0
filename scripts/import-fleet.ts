@@ -13,6 +13,8 @@
  *   "vehicles": [{
  *     "name": "Hyundai Sonata", "imei": "868720065147146", "plate": "AA08376",
  *     "vehicleType": "car",                       // truck, van, car, pickup, motorcycle, bus or null
+ *     "trackerModel": "concox-gt06n",             // optional, an id from src/lib/trackers.ts
+ *     "simNumber": "8096728477", "simCarrier": "Claro", "apn": "…",   // optional
  *     "lastPosition": { "latitude": 18.46, "longitude": -69.30, "speedKmh": 0,
  *                       "course": 248, "time": "2026-10-24T18:43:11Z" }   // optional
  *   }]
@@ -22,12 +24,17 @@
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { slugify } from "../src/lib/slug";
+import { parseDeviceConfig } from "../src/lib/device-config";
 
 interface FleetVehicle {
   name: string;
   imei: string;
   plate?: string | null;
   vehicleType?: string | null;
+  trackerModel?: string | null;
+  simNumber?: string | null;
+  simCarrier?: string | null;
+  apn?: string | null;
   lastPosition?: { latitude: number; longitude: number; speedKmh: number; course: number; time: string } | null;
 }
 
@@ -112,11 +119,21 @@ async function main() {
       traccarDevice = { ...(await res.json()), lastUpdate: null };
     }
 
+    // Tracker and SIM, checked like the device page does; a bad value is skipped, not fatal
+    const config = parseDeviceConfig({
+      ...(v.trackerModel !== undefined && { trackerModel: v.trackerModel }),
+      ...(v.simNumber !== undefined && { simNumber: v.simNumber }),
+      ...(v.simCarrier !== undefined && { simCarrier: v.simCarrier }),
+      ...(v.apn !== undefined && { apn: v.apn }),
+    });
+    if ("error" in config) counts.skipped.push(`${v.imei} (tracker/SIM: ${config.error}, imported without them)`);
+
     const data = {
       name: v.name,
       vehiclePlate: v.plate || null,
       vehicleType: v.vehicleType || null,
       traccarId: traccarDevice!.id,
+      ...("data" in config ? config.data : {}),
     };
     if (existing) {
       await db.device.update({ where: { id: existing.id }, data });
