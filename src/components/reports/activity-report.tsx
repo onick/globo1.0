@@ -2,8 +2,17 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Download, MapPin } from "lucide-react";
+import { CircleParking, Clock, Download, FileChartColumn, Gauge, MapPin, Route, Timer, Zap } from "lucide-react";
 import { DeviceRangeFilters, useDeviceRange } from "@/components/filters/device-range-filters";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FormField } from "@/components/shared/form-field";
+import { PageHeader } from "@/components/shared/page-header";
+import { StatCard } from "@/components/shared/stat-card";
 import type { RouteStop } from "@/lib/history";
 import type { IdlePeriod, SpeedingEvent, Trip } from "@/lib/activity";
 
@@ -30,6 +39,8 @@ type Tab = "trips" | "stops" | "idle" | "speeding";
 interface Column {
   header: string;
   value: (row: Record<string, unknown>) => string | number;
+  // Right-aligned figure
+  numeric?: boolean;
 }
 
 // Margin around a row's period when opening it on the map, so the approach is visible
@@ -43,31 +54,31 @@ const COLUMNS: Record<Tab, Column[]> = {
   trips: [
     { header: "Start", value: (r) => time(r.startTime) },
     { header: "End", value: (r) => time(r.endTime) },
-    { header: "Duration (min)", value: (r) => Number(r.durationMin) },
-    { header: "Distance (km)", value: (r) => Number(r.distanceKm) },
+    { header: "Duration (min)", value: (r) => Number(r.durationMin), numeric: true },
+    { header: "Distance (km)", value: (r) => Number(r.distanceKm), numeric: true },
     { header: "Distance from", value: (r) => (r.distanceSource === "roads" ? "roads" : "GPS") },
-    { header: "Max speed (km/h)", value: (r) => Number(r.maxSpeedKmh) },
-    { header: "Avg moving speed (km/h)", value: (r) => Number(r.avgMovingSpeedKmh) },
+    { header: "Max speed (km/h)", value: (r) => Number(r.maxSpeedKmh), numeric: true },
+    { header: "Avg moving speed (km/h)", value: (r) => Number(r.avgMovingSpeedKmh), numeric: true },
   ],
   stops: [
     { header: "Start", value: (r) => time(r.startTime) },
     { header: "End", value: (r) => time(r.endTime) },
-    { header: "Duration (min)", value: (r) => Number(r.durationMin) },
+    { header: "Duration (min)", value: (r) => Number(r.durationMin), numeric: true },
     { header: "Address", value: (r) => String(r.address ?? "") },
     { header: "Location", value: (r) => coords(r.latitude, r.longitude) },
   ],
   idle: [
     { header: "Start", value: (r) => time(r.startTime) },
     { header: "End", value: (r) => time(r.endTime) },
-    { header: "Duration (min)", value: (r) => Number(r.durationMin) },
+    { header: "Duration (min)", value: (r) => Number(r.durationMin), numeric: true },
     { header: "Location", value: (r) => coords(r.latitude, r.longitude) },
   ],
   speeding: [
     { header: "Start", value: (r) => time(r.startTime) },
     { header: "End", value: (r) => time(r.endTime) },
-    { header: "Duration (s)", value: (r) => Number(r.durationSec) },
-    { header: "GPS fixes", value: (r) => Number(r.fixes) },
-    { header: "Max speed (km/h)", value: (r) => Number(r.maxSpeedKmh) },
+    { header: "Duration (s)", value: (r) => Number(r.durationSec), numeric: true },
+    { header: "GPS fixes", value: (r) => Number(r.fixes), numeric: true },
+    { header: "Max speed (km/h)", value: (r) => Number(r.maxSpeedKmh), numeric: true },
     { header: "Location of max", value: (r) => coords(r.latitude, r.longitude) },
   ],
 };
@@ -148,123 +159,127 @@ export function ActivityReport() {
   const t = report?.totals;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      <PageHeader
+        title="Reports"
+        description="Trips, stops, idling and speeding for one vehicle and period"
+        actions={
+          report && (
+            <Button variant="outline" onClick={downloadCsv} disabled={!rows.length}>
+              <Download />
+              Export CSV
+            </Button>
+          )
+        }
+      />
+
       <DeviceRangeFilters range={range} onSubmit={loadReport} loading={loading} submitLabel="Run report">
-        <label className="flex flex-col gap-1 text-sm">
-          Speed limit (km/h)
-          <input
+        <FormField label="Speed limit (km/h)">
+          <Input
             type="number"
             min={10}
             max={200}
             value={speedLimit}
             onChange={(e) => setSpeedLimit(Number(e.target.value))}
-            className="border rounded-md px-3 py-2 text-sm w-28"
+            className="w-24"
           />
-        </label>
+        </FormField>
       </DeviceRangeFilters>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-4 py-2">
-          {error}
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {loading && !report && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-[66px] rounded-xl" />
+          ))}
+        </div>
+      )}
+
+      {!report && !loading && !error && (
+        <div className="bg-card border rounded-xl py-16 text-center">
+          <FileChartColumn className="size-10 text-slate-300 mx-auto" />
+          <p className="text-sm font-medium text-foreground mt-3">No report yet</p>
+          <p className="text-sm text-muted-foreground mt-1">Choose a vehicle and a period, then run the report.</p>
         </div>
       )}
 
       {report && t && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              ["Trips", `${t.trips} · ${t.distanceKm} km`],
-              ["Driving", `${t.drivingMin} min`],
-              ["Stops", `${t.stops} · ${t.stoppedMin} min`],
-              ["Idling", t.idleMin === null ? "No ignition data" : `${t.idleMin} min`],
-              [`Over ${report.speeding.limitKmh} km/h`, String(t.speedingEvents)],
-              ["Max speed", `${t.maxSpeedKmh} km/h`],
-            ].map(([label, value]) => (
-              <div key={label} className="bg-white border rounded-lg px-4 py-3">
-                <div className="text-xs text-zinc-500">{label}</div>
-                <div className="text-lg font-semibold">{value}</div>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+            <StatCard icon={Route} label="Trips" value={t.trips} detail={`${t.distanceKm} km`} />
+            <StatCard icon={Clock} label="Driving" value={`${t.drivingMin} min`} tone="green" />
+            <StatCard icon={CircleParking} label="Stops" value={t.stops} detail={`${t.stoppedMin} min`} tone="slate" />
+            <StatCard
+              icon={Timer}
+              label="Idling"
+              value={t.idleMin === null ? "—" : `${t.idleMin} min`}
+              detail={t.idleMin === null ? "no ignition data" : undefined}
+              tone="amber"
+            />
+            <StatCard icon={Zap} label={`Over ${report.speeding.limitKmh} km/h`} value={t.speedingEvents} tone="red" />
+            <StatCard icon={Gauge} label="Max speed" value={`${t.maxSpeedKmh} km/h`} tone="blue" />
           </div>
 
-          <div className="bg-white border rounded-lg">
-            <div className="flex items-center justify-between border-b px-2">
-              <div className="flex">
-                {(
-                  [
-                    ["trips", `Trips (${report.trips.length})`],
-                    ["stops", `Stops (${report.stops.length})`],
-                    ["idle", `Idling (${report.idle?.length ?? "—"})`],
-                    ["speeding", `Speeding (${report.speeding.events.length})`],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => setTab(key)}
-                    className={`px-4 py-3 text-sm border-b-2 -mb-px ${
-                      tab === key ? "border-zinc-900 font-medium" : "border-transparent text-zinc-500"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={downloadCsv}
-                disabled={!rows.length}
-                className="flex items-center gap-2 px-3 py-1.5 border rounded-md text-sm hover:bg-zinc-100 disabled:opacity-50"
-              >
-                <Download className="h-4 w-4" />
-                CSV
-              </button>
+          <div className="bg-card border rounded-xl overflow-hidden">
+            <div className="px-4 pt-3 border-b">
+              <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+                <TabsList variant="line">
+                  <TabsTrigger value="trips">Trips ({report.trips.length})</TabsTrigger>
+                  <TabsTrigger value="stops">Stops ({report.stops.length})</TabsTrigger>
+                  <TabsTrigger value="idle">Idling ({report.idle?.length ?? "—"})</TabsTrigger>
+                  <TabsTrigger value="speeding">Speeding ({report.speeding.events.length})</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
 
             {tab === "idle" && report.idle === null ? (
-              <p className="p-4 text-sm text-amber-700">
-                This device doesn&apos;t report ignition, so idling can&apos;t be told apart from
-                parking. Enable the ignition input on the tracker to get this report.
+              <p className="p-5 text-sm text-amber-700">
+                This vehicle&apos;s tracker doesn&apos;t report ignition, so idling can&apos;t be told apart
+                from parking. Enable the ignition input on the tracker to get this report.
               </p>
             ) : rows.length === 0 ? (
-              <p className="p-4 text-sm text-zinc-500">Nothing in this period.</p>
+              <p className="p-5 text-sm text-muted-foreground">Nothing in this period.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-zinc-500">
-                    <tr>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted hover:bg-muted">
+                    {COLUMNS[tab].map((c) => (
+                      <TableHead key={c.header} className={`text-xs text-muted-foreground px-4 ${c.numeric ? "text-right" : ""}`}>
+                        {c.header}
+                      </TableHead>
+                    ))}
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row, i) => (
+                    <TableRow key={i}>
                       {COLUMNS[tab].map((c) => (
-                        <th key={c.header} className="px-4 py-2 font-normal whitespace-nowrap">
-                          {c.header}
-                        </th>
+                        <TableCell key={c.header} className={`px-4 tabular-nums ${c.numeric ? "text-right" : ""}`}>
+                          {c.value(row)}
+                        </TableCell>
                       ))}
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row, i) => (
-                      <tr key={i} className="border-t">
-                        {COLUMNS[tab].map((c) => (
-                          <td key={c.header} className="px-4 py-2 tabular-nums">
-                            {c.value(row)}
-                          </td>
-                        ))}
-                        <td className="px-4 py-2 text-right">
-                          <Link
-                            href={mapLink(row)}
-                            className="inline-flex items-center gap-1 text-blue-600 hover:underline whitespace-nowrap"
-                          >
-                            <MapPin className="h-3.5 w-3.5" />
+                      <TableCell className="px-4 text-right">
+                        <Button asChild variant="ghost" size="sm" className="text-primary">
+                          <Link href={mapLink(row)}>
+                            <MapPin />
                             View on map
                           </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </div>
 
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted-foreground">
             Periods are measured between GPS reports, so durations can be short by up to one
             reporting interval. Stops: at or below 3 km/h for 3+ min. Idling: engine on and
             stopped for 2+ min. Trip distance follows the roads when it can be matched.

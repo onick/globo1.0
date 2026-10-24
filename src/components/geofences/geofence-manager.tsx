@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Trash2 } from "lucide-react";
+import { Crosshair, Hexagon, Loader2, MousePointerClick, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { FormField } from "@/components/shared/form-field";
+import { PageHeader } from "@/components/shared/page-header";
 import { BASE_MAP_STYLE } from "@/lib/map-style";
 import { circlePolygon, MAX_RADIUS_M, MIN_RADIUS_M } from "@/lib/geofences";
 
@@ -148,88 +155,135 @@ export function GeofenceManager({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       setError(data.error || "Could not save the geofence");
       return;
     }
+    toast.success(`Geofence "${name.trim()}" saved`);
     setCenter(null);
     setName("");
     setVersion((v) => v + 1);
   }
 
   async function remove(g: Geofence) {
-    if (!confirm(`Delete geofence "${g.name}"? Past alerts are kept.`)) return;
     const res = await fetch(`/api/geofences/${g.id}`, { method: "DELETE" });
-    if (res.ok) setGeofences((list) => list.filter((x) => x.id !== g.id));
+    if (res.ok) {
+      setGeofences((list) => list.filter((x) => x.id !== g.id));
+      toast.success(`Geofence "${g.name}" deleted`);
+    } else {
+      toast.error("Could not delete the geofence");
+    }
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-8rem)]">
-      <div className="relative h-96 lg:h-auto lg:flex-1 rounded-lg overflow-hidden border">
-        <div ref={mapContainer} className="w-full h-full" />
-        {!center && (
-          <div className="absolute top-3 left-3 bg-white px-3 py-1.5 rounded-md shadow text-sm">
-            Click the map to place a new geofence
-          </div>
-        )}
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Geofences"
+        description="Areas that raise an alert when a vehicle enters or leaves them"
+      />
 
-      <div className="lg:w-80 flex flex-col gap-4 min-h-0">
-        <div className="bg-white border rounded-lg p-4 space-y-3">
-          <h2 className="font-semibold">New geofence</h2>
-          {isSuperAdmin && (
-            <label className="flex flex-col gap-1 text-sm">
-              Client
-              <select value={tenantId} onChange={(e) => setTenantId(e.target.value)} className="border rounded-md px-3 py-2 text-sm">
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label className="flex flex-col gap-1 text-sm">
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main depot" className="border rounded-md px-3 py-2 text-sm" />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Radius (m)
-            <input
-              type="number"
-              min={MIN_RADIUS_M}
-              max={MAX_RADIUS_M}
-              step={10}
-              value={radiusM}
-              onChange={(e) => setRadiusM(Number(e.target.value))}
-              className="border rounded-md px-3 py-2 text-sm"
-            />
-          </label>
-          <div className="text-xs text-zinc-500 tabular-nums">
-            {center ? `Center: ${center.latitude.toFixed(5)}, ${center.longitude.toFixed(5)}` : "No center yet"}
+      <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-13rem)]">
+        <div className="relative h-96 lg:h-auto lg:flex-1 rounded-xl overflow-hidden border bg-card">
+          <div ref={mapContainer} className="w-full h-full" />
+          <div className="absolute top-3 left-3 flex items-center gap-2 bg-card/95 backdrop-blur px-3 py-2 rounded-lg border shadow-sm text-sm">
+            {center ? (
+              <>
+                <Crosshair className="size-4 text-orange-500" />
+                <span className="tabular-nums">
+                  {center.latitude.toFixed(5)}, {center.longitude.toFixed(5)}
+                </span>
+                <span className="text-muted-foreground">· click again to move it</span>
+              </>
+            ) : (
+              <>
+                <MousePointerClick className="size-4 text-primary" />
+                Click the map to place a new geofence
+              </>
+            )}
           </div>
-          {error && <div className="text-sm text-red-600">{error}</div>}
-          <button
-            onClick={save}
-            disabled={!center || !name.trim() || saving}
-            className="w-full px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {saving ? "Saving..." : "Save geofence"}
-          </button>
         </div>
 
-        <div className="bg-white border rounded-lg lg:flex-1 lg:overflow-y-auto">
-          <h2 className="font-semibold px-4 pt-4 pb-2">Geofences ({geofences.length})</h2>
-          {geofences.length === 0 && <p className="px-4 pb-4 text-sm text-zinc-500">None yet.</p>}
-          <ul>
-            {geofences.map((g) => (
-              <li key={g.id} className="flex items-center justify-between border-t px-4 py-2 text-sm">
-                <button onClick={() => focus(g)} className="text-left">
-                  <div className="font-medium">{g.name}</div>
-                  <div className="text-xs text-zinc-500">
-                    {g.radiusM} m{isSuperAdmin ? ` · ${g.tenant.name}` : ""}
-                  </div>
-                </button>
-                <button onClick={() => remove(g)} aria-label={`Delete ${g.name}`} className="p-1.5 rounded hover:bg-zinc-100">
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </button>
-              </li>
-            ))}
-          </ul>
+        <div className="lg:w-80 flex flex-col gap-4 min-h-0">
+          <div className="bg-card border rounded-xl p-4 space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">New geofence</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">A circle around the point you click on the map.</p>
+            </div>
+            {isSuperAdmin && (
+              <FormField label="Client">
+                <Select value={tenantId} onValueChange={setTenantId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose a client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tenants.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            )}
+            <FormField label="Name" htmlFor="geofence-name">
+              <Input id="geofence-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main depot" />
+            </FormField>
+            <FormField label="Radius (m)" htmlFor="geofence-radius" hint={`Between ${MIN_RADIUS_M} and ${MAX_RADIUS_M} m`}>
+              <Input
+                id="geofence-radius"
+                type="number"
+                min={MIN_RADIUS_M}
+                max={MAX_RADIUS_M}
+                step={10}
+                value={radiusM}
+                onChange={(e) => setRadiusM(Number(e.target.value))}
+              />
+            </FormField>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <div className="flex gap-2">
+              {center && (
+                <Button variant="outline" onClick={() => setCenter(null)}>
+                  Cancel
+                </Button>
+              )}
+              <Button onClick={save} disabled={!center || !name.trim() || saving} className="flex-1">
+                {saving && <Loader2 className="animate-spin" />}
+                {center ? "Save geofence" : "Place it on the map first"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="bg-card border rounded-xl lg:flex-1 lg:overflow-y-auto">
+            <div className="flex items-center justify-between px-4 pt-4 pb-2">
+              <h2 className="text-sm font-semibold text-foreground">Geofences</h2>
+              <span className="text-xs text-muted-foreground">{geofences.length}</span>
+            </div>
+            {geofences.length === 0 ? (
+              <div className="px-4 pb-6 pt-2 text-center">
+                <Hexagon className="size-8 text-slate-300 mx-auto" />
+                <p className="text-sm text-muted-foreground mt-2">No geofences yet.</p>
+              </div>
+            ) : (
+              <ul className="px-2 pb-2">
+                {geofences.map((g) => (
+                  <li key={g.id} className="group flex items-center gap-1 rounded-lg hover:bg-accent">
+                    <button onClick={() => focus(g)} className="flex-1 min-w-0 text-left px-2 py-2">
+                      <div className="text-sm font-medium text-foreground truncate">{g.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {g.radiusM} m{isSuperAdmin ? ` · ${g.tenant.name}` : ""}
+                      </div>
+                    </button>
+                    <ConfirmDialog
+                      title={`Delete "${g.name}"?`}
+                      description="Vehicles will stop raising alerts for this area. Past alerts are kept."
+                      onConfirm={() => remove(g)}
+                      trigger={
+                        <Button variant="ghost" size="icon-sm" aria-label={`Delete ${g.name}`} className="text-muted-foreground hover:text-destructive">
+                          <Trash2 />
+                        </Button>
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
     </div>
