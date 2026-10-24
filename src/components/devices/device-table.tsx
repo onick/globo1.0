@@ -41,11 +41,13 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> =
 interface DeviceTableProps {
   devices: Device[];
   loading: boolean;
-  onEdit: (device: Device) => void;
+  // Without it the row has no edit button (the user's role can't edit)
+  onEdit?: (device: Device) => void;
   onDeleted: () => void;
+  canDelete: boolean;
 }
 
-export function DeviceTable({ devices, loading, onEdit, onDeleted }: DeviceTableProps) {
+export function DeviceTable({ devices, loading, onEdit, onDeleted, canDelete }: DeviceTableProps) {
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete "${name}"? This will also remove it from Traccar.`)) return;
     const res = await fetch(`/api/devices/${id}`, { method: "DELETE" });
@@ -188,20 +190,24 @@ export function DeviceTable({ devices, loading, onEdit, onDeleted }: DeviceTable
                 {/* Actions */}
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1 justify-end">
-                    <button
-                      onClick={() => onEdit(device)}
-                      className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-[#2563EB] hover:bg-[#EFF6FF] transition-colors"
-                      title="Edit device"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(device.id, device.name)}
-                      className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-red-500 hover:bg-red-50 transition-colors"
-                      title="Delete device"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {onEdit && (
+                      <button
+                        onClick={() => onEdit(device)}
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-[#2563EB] hover:bg-[#EFF6FF] transition-colors"
+                        title="Edit device"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        onClick={() => handleDelete(device.id, device.name)}
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-red-500 hover:bg-red-50 transition-colors"
+                        title="Delete device"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

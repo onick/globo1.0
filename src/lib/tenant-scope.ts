@@ -11,3 +11,7 @@ export function tenantScope(user: Record<string, unknown>): { tenantId?: string 
 export function noClientResponse() {
   return NextResponse.json({ error: "Your user has no company assigned" }, { status: 403 });
 }
+
+export function forbiddenResponse() {
+  return NextResponse.json({ error: "Your role doesn't allow this" }, { status: 403 });
+}

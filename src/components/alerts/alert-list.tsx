@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/shared/page-header";
+import { useCan } from "@/components/shared/role-provider";
 
 interface Alert {
   id: string;
@@ -95,6 +96,7 @@ export function AlertList() {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [type, setType] = useState(ALL_TYPES);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const canAcknowledge = useCan("alerts:acknowledge");
   // Bumped to reload right away (e.g. after marking alerts read)
   const [version, setVersion] = useState(0);
 
@@ -144,10 +146,12 @@ export function AlertList() {
         title="Alerts"
         description="Geofence entries and exits and speeding, with who was notified"
         actions={
-          <Button variant="outline" onClick={() => markRead()} disabled={!unread}>
-            <CheckCheck />
-            Mark all as read
-          </Button>
+          canAcknowledge && (
+            <Button variant="outline" onClick={() => markRead()} disabled={!unread}>
+              <CheckCheck />
+              Mark all as read
+            </Button>
+          )
         }
       />
 
@@ -245,7 +249,7 @@ export function AlertList() {
                             View on map
                           </Link>
                         </Button>
-                        {!a.readAt && (
+                        {!a.readAt && canAcknowledge && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button variant="ghost" size="icon-sm" onClick={() => markRead([a.id])} aria-label="Mark as read">

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import type { AlertType, NotificationChannel } from "@prisma/client";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
-import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
+import { forbiddenResponse, noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { emailConfigured, whatsappConfigured } from "@/lib/notify/channels";
 import { validateRecipient } from "@/lib/notify/validate";
 
@@ -34,9 +35,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { tenantId, role } = session.user as Record<string, unknown>;
-  if (role !== "admin" && role !== "super_admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!can(role, "notifications:manage")) return forbiddenResponse();
 
   const body = await request.json();
   const targetTenant = role === "super_admin" ? body.tenantId : tenantId;

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
-import { noClientResponse, tenantScope } from "@/lib/tenant-scope";
+import { forbiddenResponse, noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { invalidateAlertCache } from "@/lib/alert-processor";
 import { MAX_RADIUS_M, MIN_RADIUS_M } from "@/lib/geofences";
 
@@ -29,9 +30,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { tenantId, role } = session.user as Record<string, unknown>;
-  if (role !== "admin" && role !== "super_admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!can(role, "geofences:manage")) return forbiddenResponse();
 
   const body = await request.json();
   const name = typeof body.name === "string" ? body.name.trim() : "";

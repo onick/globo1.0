@@ -27,7 +27,7 @@ const mainNav = [
   { name: "Reports", href: "/reports", icon: FileBarChart },
 ];
 
-export function Sidebar({ role }: { role: string }) {
+export function Sidebar({ role, userName }: { role: string; userName: string }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -150,11 +150,11 @@ export function Sidebar({ role }: { role: string }) {
       {/* User Area */}
       <div className={`flex items-center gap-2.5 px-2 py-2.5 ${collapsed ? "justify-center" : ""}`}>
         <div className="w-8 h-8 rounded-full bg-[#3B82F6] flex items-center justify-center text-[11px] font-bold text-white shrink-0">
-          M
+          {userName.charAt(0).toUpperCase()}
         </div>
         {!collapsed && (
-          <span className="text-[13px] font-medium text-white/85">
-            Marcelino F.
+          <span className="text-[13px] font-medium text-white/85 truncate">
+            {userName}
           </span>
         )}
       </div>
