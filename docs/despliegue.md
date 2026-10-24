@@ -51,8 +51,26 @@ Copia el código nuevo y luego:
 $C --profile tools build && $C --profile tools run --rm tools npx prisma migrate deploy && $C up -d app
 ```
 
+## Copias de seguridad
+
+`scripts/backup-prod.sh` vuelca cada día las dos bases (Globo y Traccar). Corre a las 02:50 UTC desde el cron de root y deja el registro en `/var/log/globo-backup.log`. Cada volcado:
+- se cifra con [age](https://age-encryption.org) usando la clave **pública** de `backup.env`;
+- se guarda en `/root/globo-backups/<fecha>/`, con un `SHA256SUMS`;
+- se envía fuera del servidor si `BACKUP_RCLONE_REMOTE` tiene un remoto de rclone;
+- se borra pasados 14 días (`BACKUP_KEEP_DAYS`), tanto aquí como en el remoto.
+
+`last-success` guarda la hora de la última copia correcta.
+
+La clave **privada** no está en el servidor. Si alguien entra en él, no puede leer las copias. Guárdala en un gestor de contraseñas: sin ella las copias no sirven.
+
+Para restaurar, por ejemplo en un Postgres vacío:
+
+```bash
+age -d -i globo-backup-key.txt globo.dump.age | pg_restore -d globo --clean --if-exists --no-owner
+age -d -i globo-backup-key.txt traccar.dump.age | pg_restore -d traccar --clean --if-exists --no-owner
+```
+
 ## Pendiente para producción
 
-- Copias de seguridad diarias de `db-data` y `traccar-db-data`, fuera del servidor.
 - Monitoreo del puerto web y de los puertos de los GPS.
 - Dominio propio para la web y para los rastreadores.
