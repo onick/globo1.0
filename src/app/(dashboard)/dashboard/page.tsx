@@ -1,21 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  TrendingUp,
-  ArrowUpRight,
-  Truck,
-} from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, Bell, Truck } from "lucide-react";
+import type { DashboardSummary } from "@/lib/dashboard-data";
+
+// Every figure on this page comes from /api/dashboard/summary (positions and alerts of the
+// tenant's vehicles). While loading it shows "—"; if it fails it says so: never sample data.
+
+const REFRESH_MS = 120_000;
 
 /* ── tiny bar chart ───────────────────────────────────── */
-function MiniBarChart({ data, color = "#DBEAFE" }: { data: number[]; color?: string }) {
+function MiniBarChart({ data, labels, color = "#DBEAFE" }: { data: number[]; labels: string[]; color?: string }) {
   const max = Math.max(...data, 1);
   return (
     <div className="flex items-end gap-[5px] h-12 mt-auto">
       {data.map((v, i) => (
         <div
           key={i}
-          className="flex-1 rounded-t"
+          title={labels[i]}
+          className="flex-1 rounded-t min-h-[2px]"
           style={{ height: `${(v / max) * 100}%`, backgroundColor: color }}
         />
       ))}
@@ -48,245 +52,209 @@ function DonutChart({ value, total }: { value: number; total: number }) {
   );
 }
 
-/* ── safety gauge (SVG) ───────────────────────────────── */
-function SafetyGauge({ score }: { score: number }) {
-  const pct = Math.min(score / 10, 1);
-  const r = 36;
-  const circ = 2 * Math.PI * r;
+/* ── helpers ──────────────────────────────────────────── */
+const km = (value: number) => `${value.toLocaleString("en-US", { maximumFractionDigits: 1 })} km`;
+const hours = (minutes: number) => `${(minutes / 60).toLocaleString("en-US", { maximumFractionDigits: 1 })} h`;
+const shortDay = (key: string) =>
+  new Date(`${key}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+
+function Change({ pct, label }: { pct: number | null; label: string }) {
+  if (pct === null) return <span className="text-[12px] text-[#94A3B8]">No data yesterday to compare</span>;
+  const up = pct >= 0;
   return (
-    <svg width="90" height="90" viewBox="0 0 90 90" className="mx-auto">
-      <circle cx="45" cy="45" r={r} fill="none" stroke="#F1F5F9" strokeWidth="8" />
-      <circle
-        cx="45"
-        cy="45"
-        r={r}
-        fill="none"
-        stroke="#16A34A"
-        strokeWidth="8"
-        strokeDasharray={circ}
-        strokeDashoffset={circ * (1 - pct)}
-        strokeLinecap="round"
-        transform="rotate(-90 45 45)"
-        className="transition-all duration-500"
-      />
-    </svg>
+    <span className={`text-[12px] font-medium ${up ? "text-[#16A34A]" : "text-[#EF4444]"}`}>
+      {up ? "+" : ""}
+      {pct}% <span className="text-[#94A3B8] font-normal">{label}</span>
+    </span>
   );
 }
 
-/* ── mock data ────────────────────────────────────────── */
-const topVehicles = [
-  { plate: "#GH-44459-KC", model: "Toyota Hilux", km: 1512.7, color: "bg-[#2563EB]" },
-  { plate: "#AP-35602-AZ", model: "Mercedes Actros", km: 1407.4, color: "bg-[#EF4444]" },
-  { plate: "#NU-82307-DX", model: "Volvo FH16", km: 1206.2, color: "bg-[#F59E0B]" },
-  { plate: "#JY-34844-IU", model: "Kenworth T680", km: 1142.1, color: "bg-[#16A34A]" },
-  { plate: "#YU-49266-LG", model: "Scania R Series", km: 1123.9, color: "bg-[#EF4444]" },
-  { plate: "#FF-23955-RG", model: "Mack Anthem", km: 987.7, color: "bg-[#F59E0B]" },
-  { plate: "#SG-09924-HV", model: "DAF XF", km: 938.3, color: "bg-[#16A34A]" },
-];
+const card = "bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex flex-col";
 
-const barData1 = [20, 35, 15, 45, 60, 50, 70, 40, 55, 30, 25, 65];
-const barData2 = [30, 15, 45, 25, 60, 35, 50, 20, 40, 55, 30, 45];
-
-// TODO(product): totalDistance is a fixed number and the fallback is sample data; both are
-// shown to customers as if real
-async function loadStats() {
-  try {
-    const res = await fetch("/api/positions");
-    if (res.ok) {
-      const data = await res.json();
-      return { activeDevices: data.length || 0, totalDistance: 48291, totalVehicles: data.length || 0 };
-    }
-  } catch {
-    // fall through to the sample data below
-  }
-  return { activeDevices: 342, totalDistance: 48291, totalVehicles: 54 };
+async function fetchSummary(): Promise<DashboardSummary> {
+  const res = await fetch("/api/dashboard/summary");
+  if (!res.ok) throw new Error("Could not load the dashboard");
+  return res.json();
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({
-    activeDevices: 0,
-    totalDistance: 0,
-    totalVehicles: 0,
-  });
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [failed, setFailed] = useState(false);
 
-  // Loaded once; state is set from the request's callback, not synchronously in the effect
+  // State is set from the request's callback, not synchronously in the effect
   useEffect(() => {
     let active = true;
-    loadStats().then((next) => {
-      if (active) setStats(next);
-    });
+    const refresh = () =>
+      fetchSummary()
+        .then((data) => {
+          if (!active) return;
+          setSummary(data);
+          setFailed(false);
+        })
+        .catch(() => {
+          if (active) setFailed(true);
+        });
+    refresh();
+    const timer = setInterval(refresh, REFRESH_MS);
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, []);
 
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  const s = summary;
+  const dash = "—";
+  const weekLabels = s?.week.map((d) => shortDay(d.date)) ?? [];
+  const dateStr = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
     <div className="flex flex-col gap-6">
-      {/* ── TOP KPI ROW ──────────────────────────────── */}
-      <div className="grid grid-cols-[280px_1fr_1fr_260px] gap-6">
-        {/* Insights Card */}
+      {failed && !s && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+          The dashboard couldn&apos;t load. Figures will appear as soon as the server responds.
+        </div>
+      )}
+
+      {/* ── TOP ROW ──────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[280px_1fr_1fr_260px] gap-6">
+        {/* Today in one line */}
         <div className="bg-gradient-to-b from-[#1E40AF] to-[#3B82F6] rounded-2xl p-5 flex flex-col justify-between text-white">
           <div>
             <span className="text-[12px] text-white/70">{dateStr}</span>
-            <h2 className="text-[20px] font-bold mt-1">Insights</h2>
-            <p className="text-[13px] text-white/70 mt-2 leading-relaxed">
-              Fleet utilization increased by 8%, improving route efficiency and reducing idle time.
-            </p>
+            <h2 className="text-[20px] font-bold mt-1">Today</h2>
+            <p className="text-[13px] text-white/80 mt-2 leading-relaxed">{s ? s.insight : "Loading today's activity…"}</p>
           </div>
-          <button className="text-[13px] font-semibold text-white underline underline-offset-2 self-start">
-            View more insights
-          </button>
+          <Link href="/reports" className="text-[13px] font-semibold text-white underline underline-offset-2 self-start mt-3">
+            Open reports
+          </Link>
         </div>
 
-        {/* Active Devices */}
-        <div className="bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex flex-col">
+        {/* Distance today */}
+        <div className={card}>
           <div className="flex items-center justify-between">
-            <span className="text-[13px] text-[#64748B]">Active Devices</span>
-            <span className="text-[11px] text-[#94A3B8] border border-[#E2E8F0] rounded-md px-2 py-0.5">
-              Today
-            </span>
+            <span className="text-[13px] text-[#64748B]">Distance</span>
+            <span className="text-[11px] text-[#94A3B8] border border-[#E2E8F0] rounded-md px-2 py-0.5">Today</span>
           </div>
           <p className="text-[36px] font-bold text-[#0F172A] tracking-tight tabular-nums mt-1">
-            {stats.activeDevices || 342}
+            {s ? km(s.today.distanceKm) : dash}
           </p>
-          <span className="text-[12px] text-[#16A34A] font-medium">
-            +12.5% <span className="text-[#94A3B8] font-normal">vs last month</span>
-          </span>
-          <MiniBarChart data={barData1} />
+          {s && <Change pct={s.today.distanceVsYesterdayPct} label="vs yesterday" />}
+          {s && <MiniBarChart data={s.week.map((d) => d.distanceKm)} labels={s.week.map((d, i) => `${weekLabels[i]}: ${km(d.distanceKm)}`)} />}
+          <span className="text-[11px] text-[#94A3B8] mt-1">Last 7 days</span>
         </div>
 
-        {/* Total Distance */}
-        <div className="bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex flex-col">
+        {/* Driving time today */}
+        <div className={card}>
           <div className="flex items-center justify-between">
-            <span className="text-[13px] text-[#64748B]">Total Distance</span>
-            <span className="text-[11px] text-[#94A3B8] border border-[#E2E8F0] rounded-md px-2 py-0.5">
-              Month
-            </span>
+            <span className="text-[13px] text-[#64748B]">Driving time</span>
+            <span className="text-[11px] text-[#94A3B8] border border-[#E2E8F0] rounded-md px-2 py-0.5">Today</span>
           </div>
           <p className="text-[36px] font-bold text-[#0F172A] tracking-tight tabular-nums mt-1">
-            {stats.totalDistance.toLocaleString()} km
+            {s ? hours(s.today.drivingMin) : dash}
           </p>
-          <span className="text-[12px] text-[#16A34A] font-medium">
-            +5.2% <span className="text-[#94A3B8] font-normal">vs last month</span>
-          </span>
-          <MiniBarChart data={barData2} />
+          {s && <Change pct={s.today.drivingVsYesterdayPct} label="vs yesterday" />}
+          {s && (
+            <MiniBarChart
+              data={s.week.map((d) => d.drivingMin)}
+              labels={s.week.map((d, i) => `${weekLabels[i]}: ${hours(d.drivingMin)}`)}
+              color="#DCFCE7"
+            />
+          )}
+          <span className="text-[11px] text-[#94A3B8] mt-1">Last 7 days</span>
         </div>
 
-        {/* Fleet Status */}
-        <div className="bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex flex-col items-center justify-center gap-2">
-          <span className="text-[13px] text-[#64748B]">Fleet Status</span>
-          <DonutChart value={stats.activeDevices || 342} total={stats.totalVehicles || 54} />
+        {/* Fleet right now */}
+        <div className={`${card} items-center justify-center gap-2`}>
+          <span className="text-[13px] text-[#64748B]">Reporting now</span>
+          <DonutChart value={s?.vehicles.reporting ?? 0} total={s?.vehicles.total ?? 0} />
           <p className="text-[28px] font-bold text-[#0F172A] tracking-tight tabular-nums leading-none">
-            {stats.totalVehicles || 54}
+            {s ? `${s.vehicles.reporting} / ${s.vehicles.total}` : dash}
           </p>
-          <span className="text-[12px] text-[#94A3B8]">Total Vehicles</span>
+          {s && (
+            <span className="text-[12px] text-[#94A3B8] text-center">
+              {s.vehicles.moving} moving · {s.vehicles.reporting - s.vehicles.moving} stopped ·{" "}
+              {s.vehicles.notReporting} not reporting
+            </span>
+          )}
         </div>
       </div>
 
       {/* ── BOTTOM ROW ───────────────────────────────── */}
-      <div className="grid grid-cols-[320px_1fr_260px] gap-6 flex-1 min-h-0">
-        {/* Top Vehicles */}
+      <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr_260px] gap-6 flex-1 min-h-0">
+        {/* Top vehicles today */}
         <div className="bg-white rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-hidden flex flex-col">
           <div className="flex items-center justify-between px-5 pt-5 pb-3">
-            <h3 className="text-[15px] font-semibold text-[#0F172A]">Top Vehicles</h3>
-            <span className="text-[11px] text-[#94A3B8] border border-[#E2E8F0] rounded-md px-2 py-0.5">
-              Avg Distance
-            </span>
+            <h3 className="text-[15px] font-semibold text-[#0F172A]">Top vehicles</h3>
+            <span className="text-[11px] text-[#94A3B8] border border-[#E2E8F0] rounded-md px-2 py-0.5">Distance today</span>
           </div>
           <div className="flex-1 overflow-y-auto px-5 pb-4">
-            <div className="flex flex-col">
-              {topVehicles.map((v, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-3 py-3 border-b border-[#F1F5F9] last:border-b-0"
-                >
-                  <div className={`w-8 h-8 ${v.color} rounded-lg flex items-center justify-center shrink-0`}>
-                    <Truck className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold text-[#0F172A]">{v.plate}</p>
-                    <p className="text-[11px] text-[#94A3B8]">{v.model}</p>
-                  </div>
-                  <span className="text-[13px] font-medium text-[#0F172A] tabular-nums">
-                    {v.km.toLocaleString()} km
-                  </span>
+            {s && s.topVehicles.length === 0 && <p className="text-[13px] text-[#94A3B8] py-3">No vehicle has moved today.</p>}
+            {s?.topVehicles.map((v) => (
+              <Link
+                key={v.id}
+                href={`/map?${new URLSearchParams({ history: "1", deviceId: v.id, from: s.todayFrom, to: s.todayTo })}`}
+                className="flex items-center gap-3 py-3 border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC] -mx-2 px-2 rounded-lg"
+              >
+                <div className="w-8 h-8 bg-[#2563EB] rounded-lg flex items-center justify-center shrink-0">
+                  <Truck className="w-4 h-4 text-white" />
                 </div>
-              ))}
-            </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-semibold text-[#0F172A] truncate">{v.name}</p>
+                  <p className="text-[11px] text-[#94A3B8]">
+                    {v.vehiclePlate ?? "No plate"} · {v.trips} trip{v.trips === 1 ? "" : "s"} · {hours(v.drivingMin)}
+                  </p>
+                </div>
+                <span className="text-[13px] font-medium text-[#0F172A] tabular-nums">{km(v.distanceKm)}</span>
+              </Link>
+            ))}
           </div>
         </div>
 
-        {/* Center Column: Driving Distance + Driving Hours */}
-        <div className="flex flex-col gap-6">
-          {/* Driving Distance */}
-          <div className="bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex-1 flex flex-col">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-[#64748B]">Driving Distance</span>
-              <button className="text-[12px] text-[#2563EB] font-medium flex items-center gap-0.5 hover:underline">
-                View details <ArrowUpRight className="w-3 h-3" />
-              </button>
-            </div>
-            <p className="text-[32px] font-bold text-[#0F172A] tracking-tight tabular-nums mt-1">
-              1,462.7 km
-            </p>
-            <span className="text-[12px] text-[#94A3B8]">Avg Distance Driven</span>
-            <MiniBarChart data={[25, 15, 40, 10, 55, 30, 45, 20, 35, 50, 25, 60]} />
+        {/* Activity today */}
+        <div className={`${card} gap-4`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] text-[#64748B]">Activity today</span>
+            <Link href="/reports" className="text-[12px] text-[#2563EB] font-medium flex items-center gap-0.5 hover:underline">
+              View details <ArrowUpRight className="w-3 h-3" />
+            </Link>
           </div>
-
-          {/* Driving Hours */}
-          <div className="bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex-1 flex flex-col">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-[#64748B]">Driving Hours</span>
-              <button className="text-[12px] text-[#2563EB] font-medium flex items-center gap-0.5 hover:underline">
-                View details <ArrowUpRight className="w-3 h-3" />
-              </button>
-            </div>
-            <p className="text-[32px] font-bold text-[#0F172A] tracking-tight tabular-nums mt-1">
-              17.5 h
-            </p>
-            <span className="text-[12px] text-[#94A3B8]">Avg Hours Driven</span>
-            <MiniBarChart data={[35, 20, 50, 30, 60, 25, 40, 15, 45, 55, 20, 35]} />
-          </div>
-        </div>
-
-        {/* Right Column: Safety Score + Upsell */}
-        <div className="flex flex-col gap-6">
-          {/* Avg Safety Score */}
-          <div className="bg-white rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex-1 flex flex-col items-center justify-center gap-1">
-            <span className="text-[13px] text-[#64748B]">Avg Safety Score</span>
-            <SafetyGauge score={8.2} />
-            <div className="flex items-baseline gap-0.5">
-              <span className="text-[28px] font-bold text-[#0F172A] tracking-tight tabular-nums">
-                8.2
-              </span>
-              <span className="text-[14px] text-[#94A3B8]">/10</span>
-            </div>
-          </div>
-
-          {/* Upsell Card */}
-          <div className="bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] rounded-2xl p-5 flex-1 flex flex-col justify-between text-white">
-            <div>
-              <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center mb-3">
-                <TrendingUp className="w-4 h-4 text-white" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              ["Trips", s ? String(s.today.trips) : dash],
+              ["Stops", s ? String(s.today.stops) : dash],
+              ["Vehicles that moved", s ? `${s.vehicles.movedToday} / ${s.vehicles.total}` : dash],
+              ["Top speed", s ? `${Math.round(s.today.maxSpeedKmh)} km/h` : dash],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <p className="text-[24px] font-bold text-[#0F172A] tabular-nums">{value}</p>
+                <p className="text-[12px] text-[#94A3B8]">{label}</p>
               </div>
-              <h3 className="text-[15px] font-bold leading-tight">
-                Elevate Your Tracking: Unlock Pro Features Today!
-              </h3>
-              <p className="text-[12px] text-white/70 mt-2 leading-relaxed">
-                Get real-time insights, advanced analytics, and priority support with Pro.
-              </p>
-            </div>
-            <button className="mt-3 h-[34px] rounded-lg bg-white text-[#1E40AF] text-[13px] font-semibold px-4 hover:bg-white/90 transition-colors self-start">
-              Upgrade to Globo Pro
-            </button>
+            ))}
           </div>
+          <p className="text-[11px] text-[#94A3B8] mt-auto">
+            Distances follow the roads when the route can be matched. Trips and stops use the same rules as the reports.
+          </p>
+        </div>
+
+        {/* Alerts today */}
+        <div className={`${card} gap-3`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] text-[#64748B]">Alerts today</span>
+            <Bell className="w-4 h-4 text-[#94A3B8]" />
+          </div>
+          <p className="text-[36px] font-bold text-[#0F172A] tracking-tight tabular-nums leading-none">
+            {s ? s.alertsToday.total : dash}
+          </p>
+          {s && (
+            <ul className="text-[13px] text-[#64748B] space-y-1">
+              <li className="flex justify-between"><span>Speeding</span><span className="tabular-nums text-[#0F172A]">{s.alertsToday.overspeed}</span></li>
+              <li className="flex justify-between"><span>Geofence entries</span><span className="tabular-nums text-[#0F172A]">{s.alertsToday.geofenceEnter}</span></li>
+              <li className="flex justify-between"><span>Geofence exits</span><span className="tabular-nums text-[#0F172A]">{s.alertsToday.geofenceExit}</span></li>
+            </ul>
+          )}
+          <Link href="/alerts" className="text-[12px] text-[#2563EB] font-medium hover:underline mt-auto">
+            {s && s.alertsToday.unread > 0 ? `${s.alertsToday.unread} unread · ` : ""}View alerts
+          </Link>
         </div>
       </div>
     </div>

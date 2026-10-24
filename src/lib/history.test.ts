@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { detectStops, haversineKm, knotsToKmh, parseRange, summarizeRoute } from "@/lib/history";
-import { chunkRanges, movingIndexes } from "@/lib/map-matching";
+import { chunkRanges, isPlausibleMatch, movingIndexes } from "@/lib/map-matching";
 import { fix } from "@/test/fixtures";
 
 describe("units and distance", () => {
@@ -64,6 +64,17 @@ describe("map matching requests", () => {
   it("doesn't send parked fixes (GPS jitter under 15 m)", () => {
     const parked = [fix(0, 18.48, 0), fix(1, 18.48004, 0), fix(2, 18.47997, 0), fix(3, 18.481, 20)];
     expect(movingIndexes(parked)).toEqual([0, 3]);
+  });
+});
+
+describe("isPlausibleMatch", () => {
+  it("accepts road distances a bit longer than the GPS line (measured: 3-9%)", () => {
+    expect(isPlausibleMatch(12.2, 12.82)).toBe(true);
+    expect(isPlausibleMatch(0.2, 0.6)).toBe(true); // short trips get some slack
+  });
+
+  it("rejects a match that inflates the distance (fixes off the roads)", () => {
+    expect(isPlausibleMatch(8.79, 20.7)).toBe(false);
   });
 });
 

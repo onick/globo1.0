@@ -30,6 +30,18 @@ export const MAX_POINTS_PER_REQUEST = 100;
 const GPS_RADIUS_M = 15;
 const REQUEST_TIMEOUT_MS = 10000;
 
+// Driving between two fixes follows the streets, so the road distance is longer than the
+// straight lines between fixes, but not by much: in tests on real streets it was 3-9% longer.
+// A match far longer than that means the fixes don't lie on roads (bad GPS, or a trace
+// OSRM had to route around), and the road distance would inflate the kilometers customers
+// see, so the GPS distance is kept instead.
+export const MAX_ROAD_TO_GPS_RATIO = 1.6;
+const PLAUSIBILITY_SLACK_KM = 0.5;
+
+export function isPlausibleMatch(gpsKm: number, roadKm: number): boolean {
+  return roadKm <= gpsKm * MAX_ROAD_TO_GPS_RATIO + PLAUSIBILITY_SLACK_KM;
+}
+
 // Splits [0, length) into windows of at most `size`, each starting where the previous
 // one ended, so consecutive requests share a point and no stretch is left unmatched.
 export function chunkRanges(length: number, size: number): [number, number][] {
@@ -88,6 +100,14 @@ export async function matchRoute(
   }
 
   if (!segments.length) return null;
+
+  const gpsKm = indexes.reduce((sum, idx, k) => (k ? sum + distanceBetweenM(points[indexes[k - 1]], points[idx]) : 0), 0) / 1000;
+  if (!isPlausibleMatch(gpsKm, distanceM / 1000)) {
+    console.warn(
+      `Map matching discarded: ${(distanceM / 1000).toFixed(2)} km by road vs ${gpsKm.toFixed(2)} km between fixes`
+    );
+    return null;
+  }
 
   // Parked fixes take the snapped position of the last moving fix before them
   const sent = new Set(indexes);
