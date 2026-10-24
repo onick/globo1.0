@@ -1,7 +1,7 @@
 // Activity reports: trips, idling and speeding, derived from a device's positions.
 // Pure functions shared by the reports API and its tests.
 
-import { haversineKm, STOP_MAX_SPEED_KMH, type RoutePoint, type RouteStop } from "@/lib/history";
+import { haversineKm, MAX_REPORT_GAP_MIN, STOP_MAX_SPEED_KMH, type RoutePoint, type RouteStop } from "@/lib/history";
 
 export interface Trip {
   startTime: string;
@@ -48,6 +48,8 @@ export const DEFAULT_SPEED_LIMIT_KMH = 80;
 // Trips are the movement between stops: a trip starts on the last fix of the previous stop
 // (so the distance counts from where the vehicle was parked) and ends on the first fix of
 // the next stop. Pauses shorter than a stop (traffic lights) stay inside the trip.
+// A trip never spans more than MAX_REPORT_GAP_MIN without reports: what the vehicle did
+// then is unknown, so it is split there and the gap counts as neither driving nor distance.
 export function detectTrips(points: RoutePoint[], stops: Omit<RouteStop, "address">[]): Trip[] {
   if (points.length < 2) return [];
 
@@ -61,15 +63,11 @@ export function detectTrips(points: RoutePoint[], stops: Omit<RouteStop, "addres
   if (lastTime > from) windows.push([from, lastTime]);
 
   const trips: Trip[] = [];
-  for (const [startTime, endTime] of windows) {
-    const firstIndex = points.findIndex((p) => p.time >= startTime);
-    let lastIndex = firstIndex;
-    while (lastIndex + 1 < points.length && points[lastIndex + 1].time <= endTime) lastIndex++;
-    if (firstIndex === -1 || lastIndex - firstIndex < 1) continue;
-
+  const addTrip = (firstIndex: number, lastIndex: number) => {
+    if (lastIndex - firstIndex < 1) return;
     const run = points.slice(firstIndex, lastIndex + 1);
     const distanceKm = run.reduce((sum, p, i) => (i ? sum + haversineKm(run[i - 1], p) : 0), 0);
-    if (distanceKm < MIN_TRIP_DISTANCE_KM) continue;
+    if (distanceKm < MIN_TRIP_DISTANCE_KM) return;
 
     const moving = run.filter((p) => p.speedKmh > STOP_MAX_SPEED_KMH);
     const first = run[0];
@@ -89,6 +87,23 @@ export function detectTrips(points: RoutePoint[], stops: Omit<RouteStop, "addres
       firstIndex,
       lastIndex,
     });
+  };
+
+  for (const [startTime, endTime] of windows) {
+    const firstIndex = points.findIndex((p) => p.time >= startTime);
+    if (firstIndex === -1) continue;
+    let lastIndex = firstIndex;
+    while (lastIndex + 1 < points.length && points[lastIndex + 1].time <= endTime) lastIndex++;
+
+    // Split at gaps without reports
+    let segmentStart = firstIndex;
+    for (let i = firstIndex + 1; i <= lastIndex; i++) {
+      if (minutesBetween(points[i - 1].time, points[i].time) > MAX_REPORT_GAP_MIN) {
+        addTrip(segmentStart, i - 1);
+        segmentStart = i;
+      }
+    }
+    addTrip(segmentStart, lastIndex);
   }
   return trips;
 }

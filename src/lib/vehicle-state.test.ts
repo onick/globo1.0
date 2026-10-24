@@ -25,4 +25,9 @@ describe("currentState", () => {
     const points = [fix(0, 18.48, 30), fix(1, 18.49, 30), fix(2, 18.49, 0), fix(3, 18.5, 30)];
     expect(currentState(points)).toMatchObject({ moving: true, since: points[0].time });
   });
+
+  it("starts the trip after a gap without reports", () => {
+    const points = [fix(0, 18.48, 30), fix(1, 18.49, 30), fix(40, 18.6, 30), fix(41, 18.61, 30)];
+    expect(currentState(points)).toMatchObject({ moving: true, since: points[2].time });
+  });
 });
