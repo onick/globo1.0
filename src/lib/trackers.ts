@@ -29,6 +29,20 @@ export interface TrackerModel {
 
 const isIp = (host: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 
+// What TRACKER_SERVER_HOST is. A domain is the best practice: if the server or its IP
+// changes, only the DNS record changes; with an IP every tracker must be set up again by SMS.
+export function trackerHostKind(host: string | null): "domain" | "ip" | "invalid" | null {
+  if (!host) return null;
+  if (isIp(host)) return host.split(".").every((n) => Number(n) <= 255) ? "ip" : "invalid";
+  const labels = host.split(".");
+  const valid =
+    host.length <= 253 &&
+    labels.length >= 2 &&
+    labels.every((l) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i.test(l)) &&
+    /[a-z]/i.test(labels[labels.length - 1]);
+  return valid ? "domain" : "invalid";
+}
+
 // A value for a command, or a visible placeholder when it isn't set yet
 function fill(value: string | null, placeholder: string) {
   return value ? { text: value, missing: false } : { text: `<${placeholder}>`, missing: true };
@@ -125,7 +139,8 @@ export const TRACKER_MODELS: TrackerModel[] = [
     name: "Coban 303F / TK103B",
     protocol: "gps103",
     port: 5001,
-    howTo: "Send each command by SMS to the tracker's SIM number. 123456 is the factory password: use yours if it was changed.",
+    howTo:
+      "Send each command by SMS to the tracker's SIM number. 123456 is the factory password: use yours if it was changed. Some Coban firmware only accept an IP in adminip.",
     commands: cobanCommands,
   },
   {

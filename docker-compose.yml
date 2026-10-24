@@ -1,8 +1,12 @@
 services:
   traccar:
-    image: traccar/traccar:latest
+    # Pinned: an unattended "latest" pull could change the server under the trackers.
+    # Upgrade on purpose and re-run the tests (6.16 needs web.path ./web in traccar.xml).
+    image: traccar/traccar:6.16.0
     ports:
-      - "8083:8082"        # Traccar web/API
+      # Traccar's own web/API: only from this machine (Globo talks to it locally)
+      - "127.0.0.1:8083:8082"
+      # Tracker protocols: these must be reachable from the internet
       - "5001:5001"        # GP103
       - "5002:5002"        # TK103-2
       - "5006:5006"        # Meiligao
