@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/shared/form-field";
 import { PageHeader } from "@/components/shared/page-header";
+import { VehicleIcon } from "@/components/shared/vehicle-icon";
 import { serverAddress, SIM_CARRIERS, trackerModel, TRACKER_MODELS } from "@/lib/trackers";
 import { VEHICLE_TYPES } from "@/lib/vehicle-types";
 import { DEFAULT_SPEED_LIMIT_KMH } from "@/lib/activity";
@@ -136,15 +137,19 @@ function GeneralTab({ device, onSaved }: { device: DeviceDetail; onSaved: () => 
         <FormField label="Plate" htmlFor="plate">
           <Input id="plate" value={form.vehiclePlate} onChange={(e) => set("vehiclePlate")(e.target.value)} disabled={readOnly} />
         </FormField>
-        <FormField label="Vehicle type">
+        <FormField label="Vehicle type" hint="Sets the vehicle's icon on the map">
           <Select value={form.vehicleType} onValueChange={set("vehicleType")} disabled={readOnly}>
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Not set</SelectItem>
+              <SelectItem value={NONE}>
+                <VehicleIcon vehicleType={null} />
+                Not set
+              </SelectItem>
               {VEHICLE_TYPES.map((t) => (
                 <SelectItem key={t.value} value={t.value}>
+                  <VehicleIcon vehicleType={t.value} />
                   {t.label}
                 </SelectItem>
               ))}

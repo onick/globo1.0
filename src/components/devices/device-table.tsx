@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { VehicleIcon } from "@/components/shared/vehicle-icon";
 import {
   Trash2,
   Cpu,
   Pencil,
-  Truck,
-  Car,
-  Bike,
 } from "lucide-react";
 
 export interface Device {
@@ -23,15 +21,6 @@ export interface Device {
   traccarId: number | null;
   createdAt: string;
 }
-
-const VEHICLE_ICONS: Record<string, typeof Truck> = {
-  truck: Truck,
-  van: Truck,
-  pickup: Car,
-  car: Car,
-  motorcycle: Bike,
-  bus: Truck,
-};
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
   active: { bg: "bg-green-50", text: "text-green-700", dot: "bg-green-500" },
@@ -103,7 +92,6 @@ export function DeviceTable({ devices, loading, onEdit, onDeleted, canDelete }: 
         </thead>
         <tbody>
           {devices.map((device) => {
-            const VehicleIcon = VEHICLE_ICONS[device.vehicleType || "truck"] || Truck;
             const status = STATUS_STYLES[device.status] || STATUS_STYLES.inactive;
 
             return (
@@ -115,7 +103,7 @@ export function DeviceTable({ devices, loading, onEdit, onDeleted, canDelete }: 
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-[#F1F5F9] flex items-center justify-center flex-shrink-0">
-                      <VehicleIcon className="w-4 h-4 text-[#64748B]" />
+                      <VehicleIcon vehicleType={device.vehicleType} className="w-4 h-4 text-[#64748B]" />
                     </div>
                     <div>
                       <Link
