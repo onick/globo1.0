@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Trash2,
   Cpu,
@@ -117,9 +118,12 @@ export function DeviceTable({ devices, loading, onEdit, onDeleted, canDelete }: 
                       <VehicleIcon className="w-4 h-4 text-[#64748B]" />
                     </div>
                     <div>
-                      <p className="text-[13px] font-medium text-[#0F172A]">
+                      <Link
+                        href={`/devices/${device.id}`}
+                        className="text-[13px] font-medium text-[#0F172A] hover:text-[#2563EB] hover:underline"
+                      >
                         {device.name}
-                      </p>
+                      </Link>
                       {device.vehiclePlate && (
                         <p className="text-[11px] text-[#94A3B8]">
                           {device.vehiclePlate}

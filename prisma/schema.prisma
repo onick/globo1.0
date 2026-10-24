@@ -98,17 +98,43 @@ model Device {
   driverPhone   String?      @map("driver_phone")
   // Overspeed alerts above this; null uses the default (80 km/h)
   speedLimitKmh Int?         @map("speed_limit_kmh")
+  // Tracker hardware: an id from src/lib/trackers.ts (protocol, port, SMS commands)
+  trackerModel  String?      @map("tracker_model")
+  // SIM in the tracker: where the setup SMS go and how it gets mobile data
+  simNumber     String?      @map("sim_number")
+  simCarrier    String?      @map("sim_carrier")
+  apn           String?
+  apnUser       String?      @map("apn_user")
+  apnPassword   String?      @map("apn_password")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  alerts Alert[]
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alerts      Alert[]
+  imeiChanges DeviceImeiChange[]
 
   @@index([tenantId])
   @@map("devices")
 }
 
 // Circular geofence; applies to every device of its tenant
+// A tracker swapped for another one in the same vehicle: the vehicle keeps its history
+model DeviceImeiChange {
+  id        String   @id @default(cuid())
+  deviceId  String   @map("device_id")
+  oldImei   String   @map("old_imei")
+  newImei   String   @map("new_imei")
+  reason    String?
+  // Who did it (email, kept even if the user is deleted later)
+  changedBy String   @map("changed_by")
+  changedAt DateTime @default(now()) @map("changed_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@map("device_imei_changes")
+}
+
 model Geofence {
   id        String   @id @default(cuid())
   tenantId  String   @map("tenant_id")

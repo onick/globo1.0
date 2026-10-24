@@ -5,6 +5,7 @@ import { call, seedTwoTenants, signInAs } from "./helpers";
 
 import * as devices from "@/app/api/devices/route";
 import * as device from "@/app/api/devices/[id]/route";
+import * as deviceImei from "@/app/api/devices/[id]/imei/route";
 import * as alertsRead from "@/app/api/alerts/read/route";
 import * as geofences from "@/app/api/geofences/route";
 import * as geofence from "@/app/api/geofences/[id]/route";
@@ -24,6 +25,16 @@ beforeEach(async () => {
 const CHANGES: [string, Action, () => Promise<{ status: number }>][] = [
   ["add a vehicle", "vehicles:create", () => call(devices.POST, { method: "POST", body: { name: "New", imei: "imei-new" } })],
   ["edit a vehicle", "vehicles:edit", () => call(device.PATCH, { method: "PATCH", params: { id: w.a.device.id }, body: { name: "Renamed" } })],
+  [
+    "set the tracker model and SIM",
+    "vehicles:configure",
+    () => call(device.PATCH, { method: "PATCH", params: { id: w.a.device.id }, body: { trackerModel: "concox-gt06n", apn: "internet" } }),
+  ],
+  [
+    "replace the tracker's IMEI",
+    "vehicles:configure",
+    () => call(deviceImei.POST, { method: "POST", params: { id: w.a.device.id }, body: { imei: "359999999999999", reason: "Broken" } }),
+  ],
   ["delete a vehicle", "vehicles:delete", () => call(device.DELETE, { method: "DELETE", params: { id: w.a.device.id } })],
   [
     "add a geofence",
@@ -64,6 +75,42 @@ describe.each(["admin", "operator", "viewer"] as const)("%s", (role) => {
     expect((await call(devices.GET)).status).toBe(200);
     expect((await call(geofences.GET)).status).toBe(200);
     expect((await call(recipients.GET)).status).toBe(200);
+  });
+});
+
+describe("device detail", () => {
+  beforeEach(async () => {
+    await db.device.update({ where: { id: w.a.device.id }, data: { apn: "internet", apnPassword: "secret" } });
+  });
+
+  it("shows the APN password only to roles that configure trackers", async () => {
+    signInAs(w.a.viewer);
+    expect((await call(device.GET, { params: { id: w.a.device.id } })).body).toMatchObject({
+      apn: "internet",
+      apnPassword: null,
+      permissions: { edit: false, configure: false, delete: false },
+    });
+    signInAs(w.a.admin);
+    expect((await call(device.GET, { params: { id: w.a.device.id } })).body).toMatchObject({
+      apnPassword: "secret",
+      permissions: { edit: true, configure: true, delete: true },
+    });
+  });
+
+  it("records an IMEI replacement and keeps the vehicle", async () => {
+    signInAs(w.a.admin);
+    await call(deviceImei.POST, { method: "POST", params: { id: w.a.device.id }, body: { imei: "359999999999999", reason: "Broken" } });
+    const { body } = await call(device.GET, { params: { id: w.a.device.id } });
+    expect(body).toMatchObject({ id: w.a.device.id, imei: "359999999999999" });
+    expect(body.imeiChanges).toEqual([
+      expect.objectContaining({ oldImei: w.a.device.imei, newImei: "359999999999999", reason: "Broken", changedBy: w.a.admin.email }),
+    ]);
+  });
+
+  it("refuses an IMEI another vehicle already has", async () => {
+    signInAs(w.a.admin);
+    const { status } = await call(deviceImei.POST, { method: "POST", params: { id: w.a.device.id }, body: { imei: w.b.device.imei } });
+    expect(status).toBe(409);
   });
 });
 

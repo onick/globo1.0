@@ -98,6 +98,15 @@ class TraccarClient {
     });
   }
 
+  // A new tracker in the same vehicle: Traccar keeps the device and its positions
+  async updateDeviceUniqueId(id: number, uniqueId: string): Promise<TraccarDevice> {
+    const device = await this.request<TraccarDevice & Record<string, unknown>>(`/devices/${id}`);
+    return this.request<TraccarDevice>(`/devices/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...device, uniqueId }),
+    });
+  }
+
   async deleteDevice(id: number): Promise<void> {
     await this.request(`/devices/${id}`, { method: "DELETE" });
   }

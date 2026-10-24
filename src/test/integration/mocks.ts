@@ -33,6 +33,7 @@ vi.mock("@/lib/traccar", () => {
       getStops: vi.fn(async () => []),
       createDevice: vi.fn(async () => ({ id: nextId++ })),
       deleteDevice: vi.fn(async () => undefined),
+      updateDeviceUniqueId: vi.fn(async (id: number, uniqueId: string) => ({ id, uniqueId })),
     },
   };
 });
