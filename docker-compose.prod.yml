@@ -1,0 +1,153 @@
+# Production on a single server behind an existing Traefik (Coolify's proxy, network
+# "coolify"). Secrets come from .env.production (see docs/despliegue.md).
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Nothing is published except the tracker ports; the web goes through Traefik and the
+# databases and Traccar's own API are reachable only inside this project's network.
+# The app also joins the shared "coolify" network, where names like "redis" and "postgres"
+# belong to other containers: it reaches its own services by their globo-* aliases.
+name: globo
+
+x-limits: &limits
+  restart: always
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  app:
+    <<: *limits
+    build: .
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://globo:${DB_PASSWORD}@globo-db:5432/globo
+      REDIS_URL: redis://:${REDIS_PASSWORD}@globo-redis:6379
+      TRACCAR_API_URL: http://globo-traccar:8082/api
+      TRACCAR_WS_URL: ws://globo-traccar:8082/api/socket
+      OSRM_URL: http://globo-osrm:5000
+      AUTH_TRUST_HOST: "true"
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      traccar: { condition: service_started }
+    networks: [default, coolify]
+    mem_limit: 1g
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: coolify
+      traefik.http.routers.globo-http.entrypoints: http
+      traefik.http.routers.globo-http.rule: Host(`${APP_HOST}`)
+      traefik.http.routers.globo-http.middlewares: globo-https
+      traefik.http.middlewares.globo-https.redirectscheme.scheme: https
+      traefik.http.routers.globo.entrypoints: https
+      traefik.http.routers.globo.rule: Host(`${APP_HOST}`)
+      traefik.http.routers.globo.tls: "true"
+      traefik.http.routers.globo.tls.certresolver: letsencrypt
+      traefik.http.services.globo.loadbalancer.server.port: "3000"
+
+  # One-off jobs with the full toolchain (migrations, first admin, fleet imports):
+  #   docker compose -f docker-compose.prod.yml --env-file .env.production run --rm tools npx prisma migrate deploy
+  tools:
+    build: { context: ., target: builder }
+    profiles: [tools]
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://globo:${DB_PASSWORD}@globo-db:5432/globo
+      TRACCAR_API_URL: http://globo-traccar:8082/api
+      TRACCAR_OSMAND_URL: http://globo-traccar:5055
+    volumes:
+      - ./imports:/imports:ro
+
+  traccar:
+    <<: *limits
+    networks:
+      default:
+        aliases: [globo-traccar]
+    image: traccar/traccar:6.16.0
+    environment:
+      CONFIG_USE_ENVIRONMENT_VARIABLES: "true"
+      DATABASE_PASSWORD: ${TRACCAR_DB_PASSWORD}
+      JAVA_OPTS: -Xms256m -Xmx512m
+    ports:
+      - "5001:5001"        # GPS103 (Coban 303F / TK103B)
+      - "5023:5023"        # GT06 (Concox)
+      - "5027:5027"        # Teltonika
+    volumes:
+      - ./docker/traccar/traccar.xml:/opt/traccar/conf/traccar.xml:ro
+      - traccar-data:/opt/traccar/data
+    depends_on:
+      traccar-db: { condition: service_healthy }
+    mem_limit: 768m
+
+  traccar-db:
+    <<: *limits
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: traccar
+      POSTGRES_USER: traccar
+      POSTGRES_PASSWORD: ${TRACCAR_DB_PASSWORD}
+    volumes:
+      - traccar-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traccar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+
+  db:
+    <<: *limits
+    networks:
+      default:
+        aliases: [globo-db]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: globo
+      POSTGRES_USER: globo
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U globo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+
+  redis:
+    <<: *limits
+    networks:
+      default:
+        aliases: [globo-redis]
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    mem_limit: 256m
+
+  osrm:
+    <<: *limits
+    networks:
+      default:
+        aliases: [globo-osrm]
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    command: osrm-routed --algorithm mld --max-matching-size 100 /data/region.osrm
+    volumes:
+      - ./docker/osrm/data:/data:ro
+    mem_limit: 1g
+
+networks:
+  coolify:
+    external: true
+
+volumes:
+  traccar-data:
+  traccar-db-data:
+  db-data:
+  redis-data:
