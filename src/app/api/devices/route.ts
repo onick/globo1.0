@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { parseSpeedLimit } from "@/lib/speed-limit";
 import { parseDeviceConfig } from "@/lib/device-config";
+import { validateImei } from "@/lib/trackers";
 import { auth } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { db } from "@/lib/db";
 import { forbiddenResponse, noClientResponse, tenantScope } from "@/lib/tenant-scope";
 import { traccar } from "@/lib/traccar";
+import { redis } from "@/lib/redis";
 
 // GET /api/devices — list devices for current tenant
 export async function GET() {
@@ -53,6 +55,11 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const checkedImei = validateImei(imei);
+  if ("error" in checkedImei) return NextResponse.json({ error: checkedImei.error }, { status: 400 });
+  if (await db.device.findUnique({ where: { imei: checkedImei.imei } })) {
+    return NextResponse.json({ error: "A device with this IMEI already exists" }, { status: 409 });
+  }
 
   // Client users add to their own client; only super admins may name one
   if (role !== "super_admin" && !tenantId) return noClientResponse();
@@ -78,10 +85,11 @@ export async function POST(request: Request) {
   const tenant = await db.tenant.findUnique({
     where: { id: finalTenantId },
   });
+  if (!tenant) return NextResponse.json({ error: "Client not found" }, { status: 400 });
   const deviceCount = await db.device.count({
     where: { tenantId: finalTenantId },
   });
-  if (tenant && deviceCount >= tenant.maxDevices) {
+  if (deviceCount >= tenant.maxDevices) {
     return NextResponse.json(
       { error: `Device limit reached (${tenant.maxDevices})` },
       { status: 403 }
@@ -91,7 +99,7 @@ export async function POST(request: Request) {
   // Create in Traccar first
   let traccarId: number | null = null;
   try {
-    const traccarDevice = await traccar.createDevice(name, imei);
+    const traccarDevice = await traccar.createDevice(name, checkedImei.imei);
     traccarId = traccarDevice.id;
   } catch {
     // Traccar might not be running in dev — continue without it
@@ -104,7 +112,7 @@ export async function POST(request: Request) {
       tenantId: finalTenantId,
       traccarId,
       name,
-      imei,
+      imei: checkedImei.imei,
       vehiclePlate: vehiclePlate || null,
       vehicleType: vehicleType || null,
       driverName: driverName || null,
@@ -113,6 +121,8 @@ export async function POST(request: Request) {
       ...config.data,
     },
   });
+  // The live bridge routes positions to the vehicle's client
+  if (traccarId) await redis.set(`device:tenant:${traccarId}`, finalTenantId);
 
   return NextResponse.json(device, { status: 201 });
 }

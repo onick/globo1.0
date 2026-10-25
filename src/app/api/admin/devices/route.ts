@@ -1,57 +1,67 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { traccar } from "@/lib/traccar";
+import { lastKnownPositions } from "@/lib/last-positions";
+import { connectionOf } from "@/lib/connection";
+import { trackerModel } from "@/lib/trackers";
 
+// GET /api/admin/devices — every client's devices with their tracker's connection, and the
+// clients for the filter. New devices are added with POST /api/devices, which also
+// registers them in Traccar.
 export async function GET() {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { role } = session.user as Record<string, unknown>;
   if (role !== "super_admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const devices = await db.device.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { tenant: { select: { id: true, name: true } } },
-  });
+  const [devices, tenants, traccarDevices, positions] = await Promise.all([
+    db.device.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        imei: true,
+        vehiclePlate: true,
+        vehicleType: true,
+        status: true,
+        createdAt: true,
+        traccarId: true,
+        trackerModel: true,
+        simNumber: true,
+        simCarrier: true,
+        tenant: { select: { id: true, name: true } },
+      },
+    }),
+    db.tenant.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    traccar.getDevices().catch((err) => {
+      console.warn("Could not load devices from Traccar:", err);
+      return [];
+    }),
+    lastKnownPositions(),
+  ]);
+  const traccarById = new Map(traccarDevices.map((d) => [d.id, d]));
 
-  const total = devices.length;
-  const active = devices.filter((d) => d.status === "active").length;
-  const inactive = devices.filter((d) => d.status === "inactive").length;
-  const disabled = devices.filter((d) => d.status === "disabled").length;
-  const activePct = total > 0 ? ((active / total) * 100).toFixed(1) : "0";
+  const rows = devices.map(({ traccarId, trackerModel: modelId, ...device }) => ({
+    ...device,
+    trackerModel: modelId,
+    trackerModelName: trackerModel(modelId)?.name ?? null,
+    ...connectionOf(
+      traccarId ? traccarById.get(traccarId)?.status : null,
+      traccarId ? positions.get(traccarId)?.fixTime : null
+    ),
+  }));
 
+  const count = (connection: string) => rows.filter((d) => d.connection === connection).length;
   return NextResponse.json({
-    devices,
-    stats: { total, active, inactive, disabled, activePct },
-  });
-}
-
-export async function POST(request: Request) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { role } = session.user as Record<string, unknown>;
-  if (role !== "super_admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const { name, imei, vehiclePlate, vehicleType, status, tenantId } = await request.json();
-
-  if (!name || !imei || !tenantId) {
-    return NextResponse.json({ error: "Name, IMEI, and Tenant are required" }, { status: 400 });
-  }
-
-  const existing = await db.device.findUnique({ where: { imei } });
-  if (existing) {
-    return NextResponse.json({ error: "A device with this IMEI already exists" }, { status: 409 });
-  }
-
-  const device = await db.device.create({
-    data: {
-      tenantId,
-      name,
-      imei,
-      vehiclePlate: vehiclePlate || null,
-      vehicleType: vehicleType || null,
-      status: status || "active",
+    devices: rows,
+    tenants,
+    stats: {
+      total: rows.length,
+      online: count("online"),
+      offline: count("offline"),
+      never: count("never"),
+      disabled: rows.filter((d) => d.status === "disabled").length,
     },
   });
-
-  return NextResponse.json(device, { status: 201 });
 }

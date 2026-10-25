@@ -13,6 +13,7 @@ import {
   Activity,
   Settings,
   Navigation,
+  Map as MapIcon,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -23,6 +24,8 @@ const mainNav = [
   { name: "Plans & Billing", href: "/admin/plans", icon: CreditCard },
   { name: "Users", href: "/admin/users", icon: Users },
   { name: "Devices", href: "/admin/devices", icon: Cpu },
+  // Every client's vehicles on the live map
+  { name: "Live map", href: "/map", icon: MapIcon },
   { name: "Audit Logs", href: "/admin/audit-logs", icon: FileText },
   { name: "System Health", href: "/admin/system-health", icon: Activity },
 ];
