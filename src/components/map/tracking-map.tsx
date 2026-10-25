@@ -1118,6 +1118,21 @@ export function TrackingMap() {
     handleHistorySearch(linkedHistory.deviceId, linkedHistory.from, linkedHistory.to);
   }, [linkedHistory, searchParams, switchToHistory, handleHistorySearch]);
 
+  /* ── Open one vehicle from a link (admin device list) ── */
+  // /map?device=<Globo device id>: once its position is known, select it and show its panel
+  const linkedDeviceId = searchParams.get("device");
+  const openedDevice = useRef<string | null>(null);
+  useEffect(() => {
+    if (!linkedDeviceId || openedDevice.current === linkedDeviceId) return;
+    const device = devices.find((d) => d.id === linkedDeviceId);
+    if (!device?.position || !mapRef.current) return;
+    openedDevice.current = linkedDeviceId;
+    setSelectedDeviceId(device.id);
+    setDetailDeviceId(device.id);
+    setSensorOverlayOpen(true);
+    mapRef.current.flyTo({ center: [device.position.longitude, device.position.latitude], zoom: 15, duration: 1000 });
+  }, [linkedDeviceId, devices]);
+
   const handleStopClick = useCallback((stop: StopEvent) => {
     mapRef.current?.flyTo({
       center: [stop.longitude, stop.latitude],

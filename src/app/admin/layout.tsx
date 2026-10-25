@@ -17,7 +17,8 @@ export default async function AdminLayout({
   return (
     <div className="flex min-h-screen bg-base-200">
       <AdminSidebar />
-      <div className="flex-1 flex flex-col">
+      {/* min-w-0: a wide table scrolls inside its card instead of widening the page */}
+      <div className="flex-1 flex flex-col min-w-0">
         <Header />
         <main className="flex-1 p-5">{children}</main>
       </div>

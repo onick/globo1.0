@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Building2, Plus, Search, Pencil, Trash2, Download, ChevronDown } from "lucide-react";
 import { TenantForm } from "@/components/admin/tenant-form";
@@ -202,7 +203,11 @@ export default function TenantsPage() {
                     <span className="text-[#CBD5E1]">No plan</span>
                   )}
                 </td>
-                <td className="px-5 py-3 text-[13px] text-[#0F172A] tabular-nums">{tenant._count.devices}</td>
+                <td className="px-5 py-3 text-[13px] text-[#0F172A] tabular-nums">
+                  <Link href={`/admin/devices?tenant=${tenant.id}`} className="hover:text-[#2563EB] hover:underline" title="See this client's devices">
+                    {tenant._count.devices}
+                  </Link>
+                </td>
                 <td className="px-5 py-3 text-[13px] text-[#0F172A] tabular-nums">{tenant._count.users}</td>
                 <td className="px-5 py-3 text-[13px] text-[#94A3B8] tabular-nums">{tenant.maxDevices}</td>
                 <td className="px-5 py-3 text-[12px] text-[#94A3B8]">

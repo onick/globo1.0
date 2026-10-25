@@ -56,9 +56,8 @@ export function DeviceForm({
       tenantId: formData.get("tenantId"),
     };
 
-    const url = device
-      ? `/api/admin/devices/${device.id}`
-      : "/api/admin/devices";
+    // New devices go through /api/devices, which also registers them in Traccar
+    const url = device ? `/api/admin/devices/${device.id}` : "/api/devices";
     const method = device ? "PATCH" : "POST";
 
     const res = await fetch(url, {
@@ -104,7 +103,13 @@ export function DeviceForm({
             placeholder="e.g. 359632048123456"
             className="input input-bordered w-full font-mono text-sm"
             defaultValue={device?.imei ?? ""}
+            readOnly={!!device}
           />
+          {device && (
+            <p className="text-xs text-base-content/60 mt-1">
+              To change it, use &ldquo;Replace IMEI&rdquo; on the device page: it keeps the history.
+            </p>
+          )}
         </fieldset>
         <fieldset className="fieldset">
           <legend className="fieldset-legend">Vehicle Plate</legend>
